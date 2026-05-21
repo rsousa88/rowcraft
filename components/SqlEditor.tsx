@@ -68,7 +68,8 @@ export default function SqlEditor({ value, onChange, onSelectionChange, tables, 
   return (
     <CodeMirror
       value={value}
-      height="200px"
+      height="100%"
+      style={{ height: "100%" }}
       theme={theme === "dark" ? oneDark : githubLight}
       extensions={extensions}
       onChange={onChange}
