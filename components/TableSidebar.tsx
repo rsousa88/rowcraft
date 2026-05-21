@@ -308,24 +308,26 @@ export function TableSidebar({
     );
   }
 
-  // ── drop zone (inline renderer, not a React component, to avoid reconciliation issues) ──
+  // ── drop zone — always in the DOM so dragover fires immediately when drag starts ──
   function renderDropZone(targetId: string | null) {
-    if (!dragItem || dragItem.type !== "table") return null;
     const key = targetId ?? "ungrouped";
+    const isDraggingTable = dragItem?.type === "table";
     const isTarget = dragTarget === key;
     return (
       <div
+        // Always rendered; height expands when a table drag is in progress
         className={[
-          "mx-2 my-0.5 h-7 rounded border-2 border-dashed flex items-center justify-center text-[10px] transition-all",
+          "mx-2 rounded border-2 border-dashed flex items-center justify-center text-[10px] transition-all duration-100",
+          isDraggingTable ? "my-0.5 h-7" : "h-0 border-transparent overflow-hidden",
           isTarget
             ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400"
             : "border-zinc-200 dark:border-zinc-700 text-zinc-300 dark:text-zinc-600",
         ].join(" ")}
-        onDragOver={(e) => onDragOver(e, key)}
+        onDragOver={(e) => { e.preventDefault(); onDragOver(e, key); }}
         onDragLeave={onDragLeave}
-        onDrop={(e) => onDrop(e, targetId)}
+        onDrop={(e) => { e.preventDefault(); onDrop(e, targetId); }}
       >
-        {isTarget ? "Drop here" : "Drop table here"}
+        {isDraggingTable && (isTarget ? "Drop here" : "Drop table here")}
       </div>
     );
   }
@@ -385,15 +387,14 @@ export function TableSidebar({
               isGroupDragTarget ? "border-t-2 border-emerald-400" : "",
             ].join(" ")}
             onDragOver={(e) => {
-              if (dragItem?.type === "group") {
-                e.preventDefault();
-                setDragTarget(`group-reorder-${group.id}`);
-              }
+              e.preventDefault(); // required for all drag types so drop is allowed
+              if (dragItem?.type === "group") setDragTarget(`group-reorder-${group.id}`);
+              else if (dragItem?.type === "table") setDragTarget(group.id);
             }}
             onDrop={(e) => {
-              if (dragItem?.type === "group") {
-                onDrop(e, group.id);
-              }
+              e.preventDefault();
+              if (dragItem?.type === "group") onDrop(e, group.id);
+              else if (dragItem?.type === "table") onDrop(e, group.id);
             }}
           >
             {/* Group header */}
@@ -480,9 +481,9 @@ export function TableSidebar({
       {/* Ungrouped section */}
       {ungroupedTables.length > 0 && (
         <div
-          onDragOver={(e) => { if (dragItem?.type === "table") onDragOver(e, "ungrouped"); }}
+          onDragOver={(e) => { e.preventDefault(); if (dragItem?.type === "table") setDragTarget("ungrouped"); }}
           onDragLeave={onDragLeave}
-          onDrop={(e) => { if (dragItem?.type === "table") onDrop(e, null); }}
+          onDrop={(e) => { e.preventDefault(); if (dragItem?.type === "table") onDrop(e, null); }}
         >
           {groups.length > 0 && (
             <div className="flex items-center gap-1 px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer" onClick={() => setUngroupedCollapsed((v) => !v)}>
@@ -495,7 +496,7 @@ export function TableSidebar({
           {!ungroupedCollapsed && (
             <>
               {ungroupedTables.map((table) => renderTableRow(table, null, false))}
-              {dragItem?.type === "table" && dragItem.fromGroup !== null && renderDropZone(null)}
+              {renderDropZone(null)}
             </>
           )}
         </div>
