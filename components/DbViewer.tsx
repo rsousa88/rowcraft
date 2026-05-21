@@ -493,6 +493,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <TableSidebar
+          dbName={dbName}
           tables={tables}
           columns={columns}
           selectedCols={selectedCols}
