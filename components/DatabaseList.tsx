@@ -71,7 +71,7 @@ export function DatabaseList({ initialDatabases }: { initialDatabases: FileObjec
       <input
         ref={inputRef}
         type="file"
-        accept=".db"
+        accept="*"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
