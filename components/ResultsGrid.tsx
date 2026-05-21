@@ -2,7 +2,25 @@
 
 import type { QueryResult } from "@/components/DbViewer";
 
-export function ResultsGrid({ result }: { result: QueryResult }) {
+function exportCsv(result: QueryResult, filename: string) {
+  const escape = (v: string | number | null) => {
+    if (v === null) return "";
+    const s = String(v);
+    return s.includes(",") || s.includes('"') || s.includes("\n")
+      ? `"${s.replace(/"/g, '""')}"`
+      : s;
+  };
+  const rows = [result.columns, ...result.rows.map((r) => r.map(escape))];
+  const csv = "﻿" + rows.map((r) => r.join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename.endsWith(".csv") ? filename : `${filename}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+export function ResultsGrid({ result, activeTable }: { result: QueryResult; activeTable?: string | null }) {
   if (result.error) {
     return (
       <div className="p-4 text-sm text-red-500 dark:text-red-400 font-mono whitespace-pre-wrap">{result.error}</div>
@@ -19,6 +37,13 @@ export function ResultsGrid({ result }: { result: QueryResult }) {
         <span className="text-xs text-zinc-400 dark:text-zinc-500">
           {result.rows.length} row{result.rows.length !== 1 ? "s" : ""}
         </span>
+        <button
+          onClick={() => exportCsv(result, activeTable ?? "export")}
+          className="text-xs text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 px-2 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          title="Export to CSV (UTF-8 with BOM for Excel)"
+        >
+          Export CSV
+        </button>
       </div>
       <table className="w-full text-sm border-collapse">
         <thead>

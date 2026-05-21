@@ -1,9 +1,11 @@
 "use client";
 
-import CodeMirror, { EditorView } from "@uiw/react-codemirror";
+import CodeMirror, { EditorView, keymap } from "@uiw/react-codemirror";
 import { sql, SQLDialect, SQLNamespace } from "@codemirror/lang-sql";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { githubLight } from "@uiw/codemirror-theme-github";
+import { autocompletion, startCompletion } from "@codemirror/autocomplete";
+import { toggleComment } from "@codemirror/commands";
 
 interface Props {
   value: string;
@@ -20,28 +22,62 @@ export default function SqlEditor({ value, onChange, onSelectionChange, tables, 
     schema[t] = columns[t] ?? [];
   }
 
+  const extensions = [
+    sql({
+      dialect: SQLDialect.define({ keywords: "" }),
+      schema,
+      upperCaseKeywords: true,
+    }),
+    EditorView.lineWrapping,
+    autocompletion({ activateOnTyping: true }),
+    keymap.of([
+      // Ctrl/Cmd+Space — trigger autocomplete
+      {
+        key: "Ctrl-Space",
+        mac: "Cmd-Space",
+        run: startCompletion,
+      },
+      // Ctrl/Cmd+K+C — comment selection (VS Code style)
+      {
+        key: "Ctrl-k Ctrl-c",
+        mac: "Cmd-k Cmd-c",
+        run: (view) => {
+          toggleComment(view);
+          return true;
+        },
+      },
+      // Ctrl/Cmd+K+U — uncomment selection
+      {
+        key: "Ctrl-k Ctrl-u",
+        mac: "Cmd-k Cmd-u",
+        run: (view) => {
+          toggleComment(view);
+          return true;
+        },
+      },
+    ]),
+    EditorView.updateListener.of((update) => {
+      const sel = update.state.sliceDoc(
+        update.state.selection.main.from,
+        update.state.selection.main.to
+      );
+      onSelectionChange(sel);
+    }),
+  ];
+
   return (
     <CodeMirror
       value={value}
       height="200px"
       theme={theme === "dark" ? oneDark : githubLight}
-      extensions={[
-        sql({ dialect: SQLDialect.define({}), schema }),
-        EditorView.lineWrapping,
-        EditorView.updateListener.of((update) => {
-          const sel = update.state.sliceDoc(
-            update.state.selection.main.from,
-            update.state.selection.main.to
-          );
-          onSelectionChange(sel);
-        }),
-      ]}
+      extensions={extensions}
       onChange={onChange}
       basicSetup={{
         lineNumbers: true,
         highlightActiveLine: true,
         bracketMatching: true,
-        autocompletion: true,
+        autocompletion: false, // we manage it above
+        defaultKeymap: true,
       }}
     />
   );

@@ -8,6 +8,7 @@ import { ResultsGrid } from "@/components/ResultsGrid";
 import { TableSidebar } from "@/components/TableSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTheme } from "@/components/ThemeProvider";
+import { SavedQueries } from "@/components/SavedQueries";
 
 const CodeMirrorEditor = dynamic(() => import("@/components/SqlEditor"), { ssr: false });
 
@@ -27,6 +28,8 @@ export function DbViewer({ dbName }: { dbName: string }) {
   const [sqlText, setSqlText] = useState("SELECT * FROM sqlite_master WHERE type='table';");
   const [result, setResult] = useState<QueryResult | null>(null);
   const [running, setRunning] = useState(false);
+  const [hasSelection, setHasSelection] = useState(false);
+  const [saving, setSaving] = useState(false);
   const selectionRef = useRef<string>("");
 
   // Load the database file via signed URL
@@ -99,13 +102,53 @@ export function DbViewer({ dbName }: { dbName: string }) {
     }
   }
 
+  function stripComments(q: string) {
+    return q
+      .split("\n")
+      .map((l) => l.replace(/--.*$/, ""))
+      .join("\n")
+      .trim();
+  }
+
   const runQuery = useCallback(
     (queryOverride?: string) => {
-      execQuery(queryOverride ?? (selectionRef.current || sqlText));
+      const raw = queryOverride ?? (selectionRef.current || sqlText);
+      if (!stripComments(raw)) {
+        setResult({ columns: [], rows: [], error: "Nothing to run — selection contains only comments." });
+        return;
+      }
+      execQuery(raw);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sqlText]
   );
+
+  async function handleSave() {
+    const database = dbRef.current;
+    if (!database) return;
+    setSaving(true);
+    try {
+      const bytes = database.export();
+      const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/x-sqlite3" });
+      const form = new FormData();
+      form.append("file", blob, dbName);
+      await fetch("/api/databases", { method: "POST", body: form });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleDownload() {
+    const database = dbRef.current;
+    if (!database) return;
+    const bytes = database.export();
+    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/x-sqlite3" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = dbName;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
 
   // Ctrl/Cmd+Enter runs query
   useEffect(() => {
@@ -168,12 +211,39 @@ export function DbViewer({ dbName }: { dbName: string }) {
         <span className="text-sm font-medium truncate">{dbName}</span>
         <div className="ml-auto flex items-center gap-2">
           <ThemeToggle />
+          {hasSelection && (
+            <button
+              onClick={() => runQuery(selectionRef.current)}
+              disabled={!db || running}
+              className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+              title="Run selected SQL (Ctrl/Cmd+Enter)"
+            >
+              Run Selected
+            </button>
+          )}
           <button
             onClick={() => runQuery()}
             disabled={!db || running}
             className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors"
+            title="Run query (Ctrl/Cmd+Enter)"
           >
             {running ? "Running…" : "Run"}
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!db || saving}
+            className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+            title="Save changes back to cloud"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={!db}
+            className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+            title="Download .db file"
+          >
+            Download
           </button>
         </div>
       </header>
@@ -193,12 +263,21 @@ export function DbViewer({ dbName }: { dbName: string }) {
 
         {/* Main area */}
         <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Saved queries toolbar */}
+          <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1.5 flex items-center">
+            <SavedQueries
+              dbName={dbName}
+              currentSql={sqlText}
+              onLoad={(q) => { setSqlText(q); execQuery(q); }}
+            />
+          </div>
+
           {/* SQL editor */}
           <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800" style={{ height: "200px" }}>
             <CodeMirrorEditor
               value={sqlText}
               onChange={setSqlText}
-              onSelectionChange={(s) => { selectionRef.current = s; }}
+              onSelectionChange={(s) => { selectionRef.current = s; setHasSelection(s.length > 0); }}
               tables={tables}
               columns={columns}
               theme={theme}
@@ -208,7 +287,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
           {/* Results */}
           <div className="flex-1 overflow-auto">
             {result ? (
-              <ResultsGrid result={result} />
+              <ResultsGrid result={result} activeTable={activeTable} />
             ) : (
               <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600 text-sm">
                 {db ? "Run a query to see results" : "Loading database…"}
