@@ -64,25 +64,44 @@ export function DbViewer({ dbName }: { dbName: string }) {
     load();
   }, [dbName]);
 
+  const [activeTable, setActiveTable] = useState<string | null>(null);
+  const dbRef = useRef<Database | null>(null);
+  useEffect(() => { dbRef.current = db; }, [db]);
+
+  function buildQuery(table: string, sel: Set<string>, allCols: string[]) {
+    const allSelected = allCols.every((c) => sel.has(c));
+    if (allSelected || sel.size === 0) {
+      return `SELECT *\nFROM "${table}"\nLIMIT 100;`;
+    }
+    const ordered = allCols.filter((c) => sel.has(c));
+    const colLines = ordered.map((c) => `  "${c}"`).join(",\n");
+    return `SELECT\n${colLines}\nFROM "${table}"\nLIMIT 100;`;
+  }
+
+  function execQuery(q: string) {
+    const database = dbRef.current;
+    if (!database) return;
+    setRunning(true);
+    try {
+      const res = database.exec(q);
+      if (res.length === 0) {
+        setResult({ columns: [], rows: [], error: "Query returned no results" });
+      } else {
+        setResult({ columns: res[0].columns, rows: res[0].values as QueryResult["rows"] });
+      }
+    } catch (e) {
+      setResult({ columns: [], rows: [], error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setRunning(false);
+    }
+  }
+
   const runQuery = useCallback(
     (queryOverride?: string) => {
-      if (!db) return;
-      const query = queryOverride ?? (selectionRef.current || sqlText);
-      setRunning(true);
-      try {
-        const res = db.exec(query);
-        if (res.length === 0) {
-          setResult({ columns: [], rows: [], error: "Query returned no results" });
-        } else {
-          setResult({ columns: res[0].columns, rows: res[0].values as QueryResult["rows"] });
-        }
-      } catch (e) {
-        setResult({ columns: [], rows: [], error: e instanceof Error ? e.message : String(e) });
-      } finally {
-        setRunning(false);
-      }
+      execQuery(queryOverride ?? (selectionRef.current || sqlText));
     },
-    [db, sqlText]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sqlText]
   );
 
   // Ctrl/Cmd+Enter runs query
@@ -97,19 +116,34 @@ export function DbViewer({ dbName }: { dbName: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [runQuery]);
 
-  function handleColToggle(table: string, col: string, checked: boolean) {
-    setSelectedCols((prev) => {
-      const next = { ...prev, [table]: new Set(prev[table]) };
-      checked ? next[table].add(col) : next[table].delete(col);
-      return next;
-    });
+  function handleTableSelect(table: string) {
+    setActiveTable(table);
+    setResult(null);
+    const q = buildQuery(table, selectedCols[table] ?? new Set(columns[table]), columns[table] ?? []);
+    setSqlText(q);
+    execQuery(q);
   }
 
-  function handleTableSelect(table: string) {
-    const cols = [...(selectedCols[table] ?? columns[table] ?? [])];
-    const select = cols.length ? cols.map((c) => `"${c}"`).join(", ") : "*";
-    const q = `SELECT ${select} FROM "${table}" LIMIT 100;`;
-    setSqlText(q);
+  function handleColToggle(table: string, col: string, checked: boolean) {
+    const newCols = new Set(selectedCols[table]);
+    checked ? newCols.add(col) : newCols.delete(col);
+    setSelectedCols((prev) => ({ ...prev, [table]: newCols }));
+    if (table === activeTable) {
+      const q = buildQuery(table, newCols, columns[table] ?? []);
+      setSqlText(q);
+      execQuery(q);
+    }
+  }
+
+  function handleAllColsToggle(table: string, checked: boolean) {
+    const allCols = columns[table] ?? [];
+    const newCols = checked ? new Set(allCols) : new Set<string>();
+    setSelectedCols((prev) => ({ ...prev, [table]: newCols }));
+    if (table === activeTable) {
+      const q = buildQuery(table, newCols, allCols);
+      setSqlText(q);
+      execQuery(q);
+    }
   }
 
   if (loadError) {
@@ -146,8 +180,10 @@ export function DbViewer({ dbName }: { dbName: string }) {
           tables={tables}
           columns={columns}
           selectedCols={selectedCols}
+          activeTable={activeTable}
           onTableSelect={handleTableSelect}
           onColToggle={handleColToggle}
+          onAllColsToggle={handleAllColsToggle}
           loading={!db && !loadError}
         />
 

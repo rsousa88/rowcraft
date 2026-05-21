@@ -25,6 +25,7 @@ export default function SqlEditor({ value, onChange, onSelectionChange, tables, 
       theme={oneDark}
       extensions={[
         sql({ dialect: SQLDialect.define({}), schema }),
+        EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           const sel = update.state.sliceDoc(
             update.state.selection.main.from,

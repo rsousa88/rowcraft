@@ -6,8 +6,10 @@ interface Props {
   tables: string[];
   columns: Record<string, string[]>;
   selectedCols: Record<string, Set<string>>;
+  activeTable: string | null;
   onTableSelect: (table: string) => void;
   onColToggle: (table: string, col: string, checked: boolean) => void;
+  onAllColsToggle: (table: string, checked: boolean) => void;
   loading: boolean;
 }
 
@@ -15,8 +17,10 @@ export function TableSidebar({
   tables,
   columns,
   selectedCols,
+  activeTable,
   onTableSelect,
   onColToggle,
+  onAllColsToggle,
   loading,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -30,8 +34,7 @@ export function TableSidebar({
   }
 
   function toggleAllCols(table: string, check: boolean) {
-    const cols = columns[table] ?? [];
-    cols.forEach((col) => onColToggle(table, col, check));
+    onAllColsToggle(table, check);
   }
 
   if (loading) {
@@ -56,7 +59,7 @@ export function TableSidebar({
 
         return (
           <div key={table}>
-            <div className="flex items-center gap-1 px-3 py-1.5 hover:bg-zinc-800 group">
+            <div className={`flex items-center gap-1 px-3 py-1.5 hover:bg-zinc-800 group ${table === activeTable ? "bg-zinc-800/60" : ""}`}>
               <button
                 className="mr-1 text-zinc-500 hover:text-zinc-300 text-xs"
                 onClick={() => toggleExpand(table)}
