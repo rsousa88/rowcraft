@@ -191,18 +191,22 @@ export function TableSidebar({
     const someChecked = cols.some((c) => sel.has(c));
 
     return (
-      <div
-        key={table}
-        draggable
-        onDragStart={(e) => onTableDragStart(e, table, fromGroup)}
-        onDragEnd={onDragEnd}
-        className="cursor-grab active:cursor-grabbing"
-      >
+      <div key={table}>
         <div className={[
           "flex items-center gap-1 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 group",
-          indent ? "pl-5 pr-3" : "px-3",
+          indent ? "pl-2 pr-3" : "px-3",
           table === activeTable ? "bg-zinc-100 dark:bg-zinc-800/60" : "",
         ].join(" ")}>
+          {/* Drag handle — only this element is draggable to avoid button conflicts */}
+          <span
+            draggable
+            onDragStart={(e) => { e.stopPropagation(); onTableDragStart(e, table, fromGroup); }}
+            onDragEnd={onDragEnd}
+            className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing text-zinc-300 dark:text-zinc-600 shrink-0 select-none text-xs px-0.5"
+            title="Drag to move to a group"
+          >
+            ⠿
+          </span>
           <button
             className="mr-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 text-xs"
             onClick={(e) => { e.stopPropagation(); setExpanded((prev) => { const next = new Set(prev); next.has(table) ? next.delete(table) : next.add(table); return next; }); }}
@@ -304,10 +308,11 @@ export function TableSidebar({
     );
   }
 
-  // ── drop zone ──
-  function DropZone({ targetId }: { targetId: string | null }) {
+  // ── drop zone (inline renderer, not a React component, to avoid reconciliation issues) ──
+  function renderDropZone(targetId: string | null) {
     if (!dragItem || dragItem.type !== "table") return null;
-    const isTarget = dragTarget === (targetId ?? "ungrouped");
+    const key = targetId ?? "ungrouped";
+    const isTarget = dragTarget === key;
     return (
       <div
         className={[
@@ -316,7 +321,7 @@ export function TableSidebar({
             ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400"
             : "border-zinc-200 dark:border-zinc-700 text-zinc-300 dark:text-zinc-600",
         ].join(" ")}
-        onDragOver={(e) => onDragOver(e, targetId ?? "ungrouped")}
+        onDragOver={(e) => onDragOver(e, key)}
         onDragLeave={onDragLeave}
         onDrop={(e) => onDrop(e, targetId)}
       >
@@ -455,7 +460,7 @@ export function TableSidebar({
                 {group.tables
                   .filter((t) => tables.includes(t)) // skip stale table names
                   .map((table) => renderTableRow(table, group.id, true))}
-                <DropZone targetId={group.id} />
+                {renderDropZone(group.id)}
               </>
             )}
 
@@ -490,9 +495,7 @@ export function TableSidebar({
           {!ungroupedCollapsed && (
             <>
               {ungroupedTables.map((table) => renderTableRow(table, null, false))}
-              {dragItem?.type === "table" && dragItem.fromGroup !== null && (
-                <DropZone targetId={null} />
-              )}
+              {dragItem?.type === "table" && dragItem.fromGroup !== null && renderDropZone(null)}
             </>
           )}
         </div>

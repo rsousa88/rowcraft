@@ -1,36 +1,113 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Rowcraft
 
-## Getting Started
+A web-based SQLite viewer and editor. Upload `.db` files, browse tables, run SQL queries, edit data inline, and export results — from any machine.
 
-First, run the development server:
+**Live app:** [rowcraft-jet.vercel.app](https://rowcraft-jet.vercel.app)
+
+---
+
+## Features
+
+### Browsing & querying
+- Upload SQLite `.db` files (stored securely in the cloud, per account)
+- Sidebar with expandable table list and per-column checkboxes — selecting/deselecting columns rewrites the `SELECT` in the editor
+- Group tables into collapsible folders for organisation — drag-and-drop to move tables between groups
+- Row count badges per table; total record count shown in results even when results are limited
+- SQL editor (CodeMirror 6) with syntax highlighting, SQL autocomplete (table and column names), and line wrapping
+- **Run** (Ctrl/Cmd+Enter) or **Run Selected** — runs the highlighted selection if present, otherwise the full query
+- `--` comment support; Ctrl+K+C / Ctrl+K+U to comment/uncomment (VS Code style)
+- Query history (last 50 per database, with timestamps)
+- Save and reload named queries per database
+
+### Results grid
+- Filter rows client-side with the quick filter bar
+- Sort by any column (click header); multi-column sort with Shift+click
+- Freeze 0–3 columns so they stay visible during horizontal scroll
+- Pagination with configurable page size (25 / 50 / 100 / 500)
+- Export to CSV (UTF-8 BOM for Excel compatibility), named after the active table
+
+### Editing data
+- Inline row editing — click the pencil icon on any row (only available when browsing a specific table)
+- Delete rows with a single click (with confirmation)
+- Create new rows via the "+ New row" button
+- Explicit NULL vs. empty string control per field (∅ toggle)
+- Changes are in-memory (sql.js runs client-side); click **Save** to write back to cloud storage
+
+### Schema management
+- Add, rename, and drop columns via the ⚙ schema editor in the sidebar
+- Rename tables
+- Import a CSV file to create a new table from it
+- Download the current database as a `.db` file
+
+### Interface
+- Light / dark / system theme (persisted)
+- Resizable SQL editor pane (drag the handle between editor and results)
+- Keyboard shortcut overlay (press `?`)
+
+---
+
+## Stack
+
+| Layer | Choice |
+|-------|--------|
+| Framework | Next.js 16 (App Router) |
+| Auth | Clerk |
+| File storage | Supabase Storage |
+| SQL engine | sql.js (SQLite WASM, runs entirely client-side) |
+| SQL editor | CodeMirror 6 via @uiw/react-codemirror |
+| Styling | Tailwind CSS v4 |
+| Deployment | Vercel |
+
+---
+
+## Running locally
+
+### Prerequisites
+- Node.js 18+
+- A [Clerk](https://clerk.com) account (free)
+- A [Supabase](https://supabase.com) project with a private `databases` storage bucket (free)
+
+### Setup
+
+```bash
+git clone https://github.com/rsousa88/rowcraft.git
+cd rowcraft
+npm install
+cp .env.local.example .env.local
+```
+
+Fill in `.env.local`:
+
+```env
+# Clerk — from your Clerk dashboard → API Keys
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+
+# Supabase — from Project Settings → API
+SUPABASE_URL=https://xxxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=sb_secret_...
+```
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Supabase bucket
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+In your Supabase project, go to **Storage → New bucket**, name it `databases`, and keep it **private**.
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## Keyboard shortcuts
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Shortcut | Action |
+|----------|--------|
+| Ctrl/Cmd+Enter | Run query (or selection if text is selected) |
+| Ctrl/Cmd+Space | Trigger autocomplete |
+| Ctrl+K, Ctrl+C | Comment selection |
+| Ctrl+K, Ctrl+U | Uncomment selection |
+| ? | Show all keyboard shortcuts |

@@ -193,10 +193,14 @@ export function DbViewer({ dbName }: { dbName: string }) {
         setResult({ columns: [], rows: [], error: "Nothing to run — selection contains only comments." });
         return;
       }
-      execQuery(raw);
+      // Preserve table-view mode (edit/delete/create) if the query still targets the active table
+      const fromMatch = raw.match(/FROM\s+"?([^"\s;,()\n]+)"?/i);
+      const queryTable = fromMatch?.[1];
+      const keepTableView = activeTable != null && queryTable === activeTable;
+      execQuery(raw, keepTableView, keepTableView ? activeTable : undefined);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sqlText]
+    [sqlText, activeTable]
   );
 
   async function handleSave() {
