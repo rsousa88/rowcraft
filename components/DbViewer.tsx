@@ -27,6 +27,8 @@ export function DbViewer({ dbName }: { dbName: string }) {
   const [selectedCols, setSelectedCols] = useState<Record<string, Set<string>>>({});
   const [sqlText, setSqlText] = useState("SELECT * FROM sqlite_master WHERE type='table';");
   const [result, setResult] = useState<QueryResult | null>(null);
+  const [rowids, setRowids] = useState<number[] | undefined>(undefined);
+  const [isTableView, setIsTableView] = useState(false);
   const [running, setRunning] = useState(false);
   const [hasSelection, setHasSelection] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -84,21 +86,74 @@ export function DbViewer({ dbName }: { dbName: string }) {
     return `SELECT\n${colLines}\nFROM "${table}"\nLIMIT 100;`;
   }
 
-  function execQuery(q: string) {
+  function execQuery(q: string, tableView = false, table?: string) {
     const database = dbRef.current;
     if (!database) return;
     setRunning(true);
+    setIsTableView(tableView);
     try {
       const res = database.exec(q);
       if (res.length === 0) {
         setResult({ columns: [], rows: [], error: "Query returned no results" });
+        setRowids(undefined);
       } else {
         setResult({ columns: res[0].columns, rows: res[0].values as QueryResult["rows"] });
+        // Fetch rowids in parallel so we can do edit/delete
+        if (tableView && table) {
+          try {
+            const rowidRes = database.exec(`SELECT rowid FROM "${table}" LIMIT 10000;`);
+            setRowids(rowidRes[0]?.values.map((r) => r[0] as number) ?? undefined);
+          } catch {
+            setRowids(undefined);
+          }
+        } else {
+          setRowids(undefined);
+        }
       }
     } catch (e) {
       setResult({ columns: [], rows: [], error: e instanceof Error ? e.message : String(e) });
+      setRowids(undefined);
     } finally {
       setRunning(false);
+    }
+  }
+
+  function handleEditRow(rowid: number, values: Record<string, string | null>) {
+    const database = dbRef.current;
+    if (!database || !activeTable) return;
+    const sets = Object.entries(values).map(([c]) => `"${c}" = ?`).join(", ");
+    const vals = [...Object.values(values), rowid];
+    try {
+      database.run(`UPDATE "${activeTable}" SET ${sets} WHERE rowid = ?`, vals);
+      // Re-run the current table query to refresh
+      execQuery(sqlText, true, activeTable);
+    } catch (e) {
+      setResult({ columns: [], rows: [], error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  function handleDeleteRow(rowid: number, confirmMsg: string) {
+    if (!confirm(confirmMsg)) return;
+    const database = dbRef.current;
+    if (!database || !activeTable) return;
+    try {
+      database.run(`DELETE FROM "${activeTable}" WHERE rowid = ?`, [rowid]);
+      execQuery(sqlText, true, activeTable);
+    } catch (e) {
+      setResult({ columns: [], rows: [], error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  function handleCreateRow(values: Record<string, string | null>) {
+    const database = dbRef.current;
+    if (!database || !activeTable) return;
+    const cols = Object.keys(values).map((c) => `"${c}"`).join(", ");
+    const placeholders = Object.keys(values).map(() => "?").join(", ");
+    try {
+      database.run(`INSERT INTO "${activeTable}" (${cols}) VALUES (${placeholders})`, Object.values(values));
+      execQuery(sqlText, true, activeTable);
+    } catch (e) {
+      setResult({ columns: [], rows: [], error: e instanceof Error ? e.message : String(e) });
     }
   }
 
@@ -167,7 +222,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
     setResult(null);
     const q = buildQuery(table, selectedCols[table] ?? new Set(columns[table]), columns[table] ?? []);
     setSqlText(q);
-    execQuery(q);
+    execQuery(q, true, table);
   }
 
   function handleColToggle(table: string, col: string, checked: boolean) {
@@ -177,7 +232,58 @@ export function DbViewer({ dbName }: { dbName: string }) {
     if (table === activeTable) {
       const q = buildQuery(table, newCols, columns[table] ?? []);
       setSqlText(q);
-      execQuery(q);
+      execQuery(q, true, table);
+    }
+  }
+
+  function handleSchemaAction(action: { type: string; table: string; column?: string; value?: string }) {
+    const database = dbRef.current;
+    if (!database) return;
+    try {
+      if (action.type === "addCol") {
+        database.run(`ALTER TABLE "${action.table}" ADD COLUMN "${action.column}" ${action.value ?? "TEXT"}`);
+      } else if (action.type === "renameCol") {
+        database.run(`ALTER TABLE "${action.table}" RENAME COLUMN "${action.column}" TO "${action.value}"`);
+      } else if (action.type === "dropCol") {
+        // Try direct DROP (SQLite 3.35+); fall back to table rebuild
+        try {
+          database.run(`ALTER TABLE "${action.table}" DROP COLUMN "${action.column}"`);
+        } catch {
+          const cols = (columns[action.table] ?? []).filter((c) => c !== action.column);
+          const colList = cols.map((c) => `"${c}"`).join(", ");
+          database.run(`BEGIN`);
+          database.run(`CREATE TABLE "__tmp_${action.table}" AS SELECT ${colList} FROM "${action.table}"`);
+          database.run(`DROP TABLE "${action.table}"`);
+          database.run(`ALTER TABLE "__tmp_${action.table}" RENAME TO "${action.table}"`);
+          database.run(`COMMIT`);
+        }
+      } else if (action.type === "renameTable") {
+        database.run(`ALTER TABLE "${action.table}" RENAME TO "${action.value}"`);
+      }
+      // Refresh tables + columns
+      const tableRes = database.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;");
+      const tableNames = tableRes[0]?.values.map((r) => r[0] as string) ?? [];
+      setTables(tableNames);
+      const colMap: Record<string, string[]> = {};
+      const selMap: Record<string, Set<string>> = {};
+      for (const t of tableNames) {
+        const info = database.exec(`PRAGMA table_info("${t}");`);
+        const cols = info[0]?.values.map((r) => r[1] as string) ?? [];
+        colMap[t] = cols;
+        selMap[t] = new Set(cols);
+      }
+      setColumns(colMap);
+      setSelectedCols(selMap);
+      // Re-run active query if table still exists
+      const newName = action.type === "renameTable" ? action.value! : action.table;
+      if (tableNames.includes(newName)) {
+        const q = buildQuery(newName, selMap[newName], colMap[newName] ?? []);
+        setSqlText(q);
+        setActiveTable(newName);
+        execQuery(q, true, newName);
+      }
+    } catch (e) {
+      setResult({ columns: [], rows: [], error: e instanceof Error ? e.message : String(e) });
     }
   }
 
@@ -188,7 +294,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
     if (table === activeTable) {
       const q = buildQuery(table, newCols, allCols);
       setSqlText(q);
-      execQuery(q);
+      execQuery(q, true, table);
     }
   }
 
@@ -258,6 +364,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
           onTableSelect={handleTableSelect}
           onColToggle={handleColToggle}
           onAllColsToggle={handleAllColsToggle}
+          onSchemaAction={handleSchemaAction}
           loading={!db && !loadError}
         />
 
@@ -285,9 +392,16 @@ export function DbViewer({ dbName }: { dbName: string }) {
           </div>
 
           {/* Results */}
-          <div className="flex-1 overflow-auto">
+          <div className="flex-1 overflow-hidden flex flex-col">
             {result ? (
-              <ResultsGrid result={result} activeTable={activeTable} />
+              <ResultsGrid
+                result={result}
+                activeTable={activeTable}
+                rowids={isTableView ? rowids : undefined}
+                onEditRow={isTableView ? handleEditRow : undefined}
+                onDeleteRow={isTableView ? handleDeleteRow : undefined}
+                onCreateRow={isTableView ? handleCreateRow : undefined}
+              />
             ) : (
               <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600 text-sm">
                 {db ? "Run a query to see results" : "Loading database…"}

@@ -24,6 +24,12 @@
 .DS_Store
 *.pem
 
+# internal docs (keep README.md)
+CLAUDE.md
+MEMORY.md
+AGENTS.md
+.claude/
+
 # debug
 npm-debug.log*
 yarn-debug.log*
