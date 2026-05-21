@@ -14,6 +14,7 @@ interface Props {
   columns: Record<string, string[]>;
   selectedCols: Record<string, Set<string>>;
   activeTable: string | null;
+  rowCounts: Record<string, number>;
   onTableSelect: (table: string) => void;
   onColToggle: (table: string, col: string, checked: boolean) => void;
   onAllColsToggle: (table: string, checked: boolean) => void;
@@ -22,7 +23,7 @@ interface Props {
 }
 
 export function TableSidebar({
-  tables, columns, selectedCols, activeTable,
+  tables, columns, selectedCols, activeTable, rowCounts,
   onTableSelect, onColToggle, onAllColsToggle, onSchemaAction, loading,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -88,6 +89,11 @@ export function TableSidebar({
               >
                 {table}
               </button>
+              {rowCounts[table] != null && (
+                <span className="text-[10px] text-zinc-400 dark:text-zinc-600 tabular-nums shrink-0">
+                  {rowCounts[table].toLocaleString()}
+                </span>
+              )}
               {/* Schema gear icon */}
               <button
                 onClick={() => setSchemaOpen(isSchemaOpen ? null : table)}

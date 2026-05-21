@@ -9,6 +9,8 @@ import { TableSidebar } from "@/components/TableSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTheme } from "@/components/ThemeProvider";
 import { SavedQueries } from "@/components/SavedQueries";
+import { QueryHistory, pushHistory } from "@/components/QueryHistory";
+import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 
 const CodeMirrorEditor = dynamic(() => import("@/components/SqlEditor"), { ssr: false });
 
@@ -20,6 +22,9 @@ export type QueryResult = {
 
 export function DbViewer({ dbName }: { dbName: string }) {
   const { theme } = useTheme();
+  const editorTheme: "light" | "dark" = theme === "auto"
+    ? (typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : theme;
   const [db, setDb] = useState<Database | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tables, setTables] = useState<string[]>([]);
@@ -29,9 +34,13 @@ export function DbViewer({ dbName }: { dbName: string }) {
   const [result, setResult] = useState<QueryResult | null>(null);
   const [rowids, setRowids] = useState<number[] | undefined>(undefined);
   const [isTableView, setIsTableView] = useState(false);
+  const [rowCounts, setRowCounts] = useState<Record<string, number>>({});
   const [running, setRunning] = useState(false);
   const [hasSelection, setHasSelection] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [editorHeight, setEditorHeight] = useState(200);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
   const selectionRef = useRef<string>("");
 
   // Load the database file via signed URL
@@ -65,6 +74,16 @@ export function DbViewer({ dbName }: { dbName: string }) {
         setColumns(colMap);
         setSelectedCols(selMap);
         setSqlText(`SELECT * FROM "${tableNames[0] ?? "sqlite_master"}" LIMIT 100;`);
+
+        // Row count badges — non-blocking, best-effort
+        const counts: Record<string, number> = {};
+        for (const t of tableNames) {
+          try {
+            const r = database.exec(`SELECT COUNT(*) FROM "${t}";`);
+            counts[t] = r[0]?.values[0][0] as number ?? 0;
+          } catch { counts[t] = 0; }
+        }
+        setRowCounts(counts);
       } catch (e) {
         setLoadError(e instanceof Error ? e.message : "Failed to load database");
       }
@@ -91,6 +110,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
     if (!database) return;
     setRunning(true);
     setIsTableView(tableView);
+    pushHistory(dbName, q.trim());
     try {
       const res = database.exec(q);
       if (res.length === 0) {
@@ -205,17 +225,114 @@ export function DbViewer({ dbName }: { dbName: string }) {
     URL.revokeObjectURL(a.href);
   }
 
-  // Ctrl/Cmd+Enter runs query
+  // Ctrl/Cmd+Enter → run; ? → shortcuts overlay
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
         runQuery();
       }
+      if (e.key === "?" && !["INPUT", "TEXTAREA"].includes((e.target as HTMLElement).tagName)) {
+        setShowShortcuts((s) => !s);
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [runQuery]);
+
+  // Drag-resize editor/results split
+  function onDragStart(e: React.MouseEvent) {
+    e.preventDefault();
+    dragRef.current = { startY: e.clientY, startH: editorHeight };
+    function onMove(ev: MouseEvent) {
+      if (!dragRef.current) return;
+      setEditorHeight(Math.max(80, Math.min(600, dragRef.current.startH + ev.clientY - dragRef.current.startY)));
+    }
+    function onUp() {
+      dragRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  // Import CSV → create new table in the in-memory db
+  function handleImportCsv(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const database = dbRef.current;
+      if (!database) return;
+      const text = e.target?.result as string;
+      const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim());
+      if (lines.length < 2) return;
+
+      function parseLine(line: string): string[] {
+        const result: string[] = [];
+        let i = 0;
+        while (i < line.length) {
+          if (line[i] === '"') {
+            let field = ""; i++;
+            while (i < line.length) {
+              if (line[i] === '"' && line[i + 1] === '"') { field += '"'; i += 2; }
+              else if (line[i] === '"') { i++; break; }
+              else { field += line[i++]; }
+            }
+            if (line[i] === ",") i++;
+            result.push(field);
+          } else {
+            let field = "";
+            while (i < line.length && line[i] !== ",") field += line[i++];
+            if (line[i] === ",") i++;
+            result.push(field);
+          }
+        }
+        return result;
+      }
+
+      const headers = parseLine(lines[0]);
+      const rows = lines.slice(1).map(parseLine);
+      const tableName = file.name.replace(/\.csv$/i, "").replace(/[^a-zA-Z0-9_]/g, "_");
+      const colDefs = headers.map((h) => `"${h.replace(/"/g, "")}" TEXT`).join(", ");
+
+      try {
+        database.run(`DROP TABLE IF EXISTS "${tableName}"`);
+        database.run(`CREATE TABLE "${tableName}" (${colDefs})`);
+        const placeholders = headers.map(() => "?").join(", ");
+        const colNames = headers.map((h) => `"${h.replace(/"/g, "")}"`).join(", ");
+        for (const row of rows) {
+          if (row.every((c) => c === "")) continue;
+          const vals = headers.map((_, i) => row[i] ?? null);
+          database.run(`INSERT INTO "${tableName}" (${colNames}) VALUES (${placeholders})`, vals);
+        }
+        // Refresh schema
+        const tableRes = database.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;");
+        const tableNames = tableRes[0]?.values.map((r) => r[0] as string) ?? [];
+        setTables(tableNames);
+        const colMap: Record<string, string[]> = {};
+        const selMap: Record<string, Set<string>> = {};
+        const counts: Record<string, number> = {};
+        for (const t of tableNames) {
+          const info = database.exec(`PRAGMA table_info("${t}");`);
+          const cols = info[0]?.values.map((r) => r[1] as string) ?? [];
+          colMap[t] = cols;
+          selMap[t] = new Set(cols);
+          try { counts[t] = database.exec(`SELECT COUNT(*) FROM "${t}";`)[0]?.values[0][0] as number ?? 0; } catch { counts[t] = 0; }
+        }
+        setColumns(colMap);
+        setSelectedCols(selMap);
+        setRowCounts(counts);
+        // Navigate to the new table
+        const q = buildQuery(tableName, selMap[tableName], colMap[tableName] ?? []);
+        setSqlText(q);
+        setActiveTable(tableName);
+        execQuery(q, true, tableName);
+      } catch (err) {
+        setResult({ columns: [], rows: [], error: err instanceof Error ? err.message : String(err) });
+      }
+    };
+    reader.readAsText(file);
+  }
 
   function handleTableSelect(table: string) {
     setActiveTable(table);
@@ -316,43 +433,36 @@ export function DbViewer({ dbName }: { dbName: string }) {
         <span className="text-zinc-300 dark:text-zinc-600">/</span>
         <span className="text-sm font-medium truncate">{dbName}</span>
         <div className="ml-auto flex items-center gap-2">
+          {/* Import CSV */}
+          <label
+            className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+            title="Import CSV as a new table"
+          >
+            Import CSV
+            <input type="file" accept=".csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportCsv(f); e.target.value = ""; }} />
+          </label>
           <ThemeToggle />
+          <button onClick={() => setShowShortcuts(true)} className="rounded-md p-1.5 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors" title="Keyboard shortcuts (?)">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+          </button>
           {hasSelection && (
-            <button
-              onClick={() => runQuery(selectionRef.current)}
-              disabled={!db || running}
-              className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
-              title="Run selected SQL (Ctrl/Cmd+Enter)"
-            >
+            <button onClick={() => runQuery(selectionRef.current)} disabled={!db || running} className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors" title="Run selected SQL">
               Run Selected
             </button>
           )}
-          <button
-            onClick={() => runQuery()}
-            disabled={!db || running}
-            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors"
-            title="Run query (Ctrl/Cmd+Enter)"
-          >
+          <button onClick={() => runQuery()} disabled={!db || running} className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors">
             {running ? "Running…" : "Run"}
           </button>
-          <button
-            onClick={handleSave}
-            disabled={!db || saving}
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
-            title="Save changes back to cloud"
-          >
+          <button onClick={handleSave} disabled={!db || saving} className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors">
             {saving ? "Saving…" : "Save"}
           </button>
-          <button
-            onClick={handleDownload}
-            disabled={!db}
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
-            title="Download .db file"
-          >
+          <button onClick={handleDownload} disabled={!db} className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors">
             Download
           </button>
         </div>
       </header>
+
+      <KeyboardShortcuts open={showShortcuts} onClose={() => setShowShortcuts(false)} />
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
@@ -361,6 +471,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
           columns={columns}
           selectedCols={selectedCols}
           activeTable={activeTable}
+          rowCounts={rowCounts}
           onTableSelect={handleTableSelect}
           onColToggle={handleColToggle}
           onAllColsToggle={handleAllColsToggle}
@@ -370,26 +481,30 @@ export function DbViewer({ dbName }: { dbName: string }) {
 
         {/* Main area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Saved queries toolbar */}
-          <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1.5 flex items-center">
-            <SavedQueries
-              dbName={dbName}
-              currentSql={sqlText}
-              onLoad={(q) => { setSqlText(q); execQuery(q); }}
-            />
+          {/* Saved queries + history toolbar */}
+          <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1.5 flex items-center gap-2 flex-wrap">
+            <SavedQueries dbName={dbName} currentSql={sqlText} onLoad={(q) => { setSqlText(q); execQuery(q); }} />
+            <QueryHistory dbName={dbName} onLoad={(q) => { setSqlText(q); execQuery(q); }} />
           </div>
 
-          {/* SQL editor */}
-          <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800" style={{ height: "200px" }}>
+          {/* SQL editor — resizable */}
+          <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 overflow-hidden" style={{ height: editorHeight }}>
             <CodeMirrorEditor
               value={sqlText}
               onChange={setSqlText}
               onSelectionChange={(s) => { selectionRef.current = s; setHasSelection(s.length > 0); }}
               tables={tables}
               columns={columns}
-              theme={theme}
+              theme={editorTheme}
             />
           </div>
+
+          {/* Drag handle */}
+          <div
+            onMouseDown={onDragStart}
+            className="shrink-0 h-1.5 cursor-row-resize bg-zinc-100 dark:bg-zinc-800 hover:bg-emerald-200 dark:hover:bg-emerald-900 transition-colors border-b border-zinc-200 dark:border-zinc-800"
+            title="Drag to resize editor"
+          />
 
           {/* Results */}
           <div className="flex-1 overflow-hidden flex flex-col">
