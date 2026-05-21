@@ -404,6 +404,31 @@ export function DbViewer({ dbName }: { dbName: string }) {
     }
   }
 
+  // Load a query from saved/history, syncing column checkboxes from the SELECT list
+  function loadQuery(q: string) {
+    setSqlText(q);
+    // Try to detect table name from FROM clause
+    const fromMatch = q.match(/FROM\s+"?([^"\s;]+)"?/i);
+    const table = fromMatch?.[1];
+    if (!table || !columns[table]) { execQuery(q); return; }
+
+    setActiveTable(table);
+
+    // Detect selected columns from SELECT clause
+    const selectPart = q.match(/^SELECT\s+([\s\S]+?)\s+FROM/i)?.[1]?.trim();
+    if (!selectPart || selectPart === "*") {
+      // SELECT * — all columns checked
+      setSelectedCols((p) => ({ ...p, [table]: new Set(columns[table]) }));
+    } else {
+      // Parse quoted column names: "col1", "col2"
+      const parsed = new Set<string>();
+      for (const m of selectPart.matchAll(/"([^"]+)"/g)) parsed.add(m[1]);
+      if (parsed.size > 0) setSelectedCols((p) => ({ ...p, [table]: parsed }));
+    }
+
+    execQuery(q, true, table);
+  }
+
   function handleAllColsToggle(table: string, checked: boolean) {
     const allCols = columns[table] ?? [];
     const newCols = checked ? new Set(allCols) : new Set<string>();
@@ -483,8 +508,8 @@ export function DbViewer({ dbName }: { dbName: string }) {
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Saved queries + history toolbar */}
           <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1.5 flex items-center gap-2 flex-wrap">
-            <SavedQueries dbName={dbName} currentSql={sqlText} onLoad={(q) => { setSqlText(q); execQuery(q); }} />
-            <QueryHistory dbName={dbName} onLoad={(q) => { setSqlText(q); execQuery(q); }} />
+            <SavedQueries dbName={dbName} currentSql={sqlText} onLoad={loadQuery} />
+            <QueryHistory dbName={dbName} onLoad={loadQuery} />
           </div>
 
           {/* SQL editor — resizable */}
