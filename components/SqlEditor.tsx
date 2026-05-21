@@ -3,6 +3,7 @@
 import CodeMirror, { EditorView } from "@uiw/react-codemirror";
 import { sql, SQLDialect, SQLNamespace } from "@codemirror/lang-sql";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { githubLight } from "@uiw/codemirror-theme-github";
 
 interface Props {
   value: string;
@@ -10,9 +11,10 @@ interface Props {
   onSelectionChange: (selected: string) => void;
   tables: string[];
   columns: Record<string, string[]>;
+  theme: "light" | "dark";
 }
 
-export default function SqlEditor({ value, onChange, onSelectionChange, tables, columns }: Props) {
+export default function SqlEditor({ value, onChange, onSelectionChange, tables, columns, theme }: Props) {
   const schema: SQLNamespace = {};
   for (const t of tables) {
     schema[t] = columns[t] ?? [];
@@ -22,7 +24,7 @@ export default function SqlEditor({ value, onChange, onSelectionChange, tables, 
     <CodeMirror
       value={value}
       height="200px"
-      theme={oneDark}
+      theme={theme === "dark" ? oneDark : githubLight}
       extensions={[
         sql({ dialect: SQLDialect.define({}), schema }),
         EditorView.lineWrapping,

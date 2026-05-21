@@ -81,12 +81,12 @@ export function DatabaseList({ initialDatabases }: { initialDatabases: FileObjec
       />
 
       {databases.length === 0 ? (
-        <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-zinc-700 py-20 text-center">
-          <p className="text-zinc-400">No databases yet</p>
+        <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 py-20 text-center">
+          <p className="text-zinc-500 dark:text-zinc-400">No databases yet</p>
           <button
             onClick={() => inputRef.current?.click()}
             disabled={uploading}
-            className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500 disabled:opacity-50"
+            className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
           >
             {uploading ? "Uploading…" : "Upload your first .db file"}
           </button>
@@ -96,14 +96,14 @@ export function DatabaseList({ initialDatabases }: { initialDatabases: FileObjec
           {databases.map((db) => (
             <div
               key={db.name}
-              className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 hover:border-zinc-600 transition-colors"
+              className="flex items-center justify-between rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-4 py-3 hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors"
             >
               <Link
                 href={`/db/${encodeURIComponent(db.name)}`}
                 className="flex-1 min-w-0"
               >
                 <p className="font-medium truncate">{db.name}</p>
-                <p className="text-xs text-zinc-500 mt-0.5">
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">
                   {db.metadata?.size ? formatBytes(db.metadata.size) : ""}
                   {db.updated_at ? ` · ${formatDate(db.updated_at)}` : ""}
                 </p>
@@ -111,7 +111,7 @@ export function DatabaseList({ initialDatabases }: { initialDatabases: FileObjec
               <button
                 onClick={() => handleDelete(db.name)}
                 disabled={deletingName === db.name}
-                className="ml-4 shrink-0 rounded px-2 py-1 text-xs text-zinc-500 hover:text-red-400 hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+                className="ml-4 shrink-0 rounded px-2 py-1 text-xs text-zinc-400 dark:text-zinc-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
               >
                 {deletingName === db.name ? "Deleting…" : "Delete"}
               </button>
@@ -122,7 +122,7 @@ export function DatabaseList({ initialDatabases }: { initialDatabases: FileObjec
             <button
               onClick={() => inputRef.current?.click()}
               disabled={uploading}
-              className="rounded-md bg-zinc-800 px-4 py-2 text-sm font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+              className="rounded-md bg-zinc-100 dark:bg-zinc-800 px-4 py-2 text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 transition-colors"
             >
               {uploading ? "Uploading…" : "Upload database"}
             </button>

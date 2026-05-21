@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { UserButton } from "@clerk/nextjs";
 import { createSupabaseAdmin } from "@/lib/supabase";
 import { DatabaseList } from "@/components/DatabaseList";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 async function getDatabases(userId: string) {
   const supabase = createSupabaseAdmin();
@@ -17,10 +18,13 @@ export default async function HomePage() {
   const databases = userId ? await getDatabases(userId) : [];
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <header className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
+      <header className="border-b border-zinc-200 dark:border-zinc-800 px-6 py-4 flex items-center justify-between">
         <span className="text-lg font-semibold tracking-tight">Rowcraft</span>
-        <UserButton />
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <UserButton />
+        </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-12">

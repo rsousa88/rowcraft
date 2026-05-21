@@ -6,6 +6,8 @@ import dynamic from "next/dynamic";
 import { sql, type Database } from "@/lib/sqljs";
 import { ResultsGrid } from "@/components/ResultsGrid";
 import { TableSidebar } from "@/components/TableSidebar";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { useTheme } from "@/components/ThemeProvider";
 
 const CodeMirrorEditor = dynamic(() => import("@/components/SqlEditor"), { ssr: false });
 
@@ -16,6 +18,7 @@ export type QueryResult = {
 };
 
 export function DbViewer({ dbName }: { dbName: string }) {
+  const { theme } = useTheme();
   const [db, setDb] = useState<Database | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tables, setTables] = useState<string[]>([]);
@@ -148,26 +151,27 @@ export function DbViewer({ dbName }: { dbName: string }) {
 
   if (loadError) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-red-400">
+      <div className="flex min-h-screen items-center justify-center bg-white dark:bg-zinc-950 text-red-500 dark:text-red-400">
         <p>{loadError}</p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100 overflow-hidden">
+    <div className="flex h-screen flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-hidden">
       {/* Header */}
-      <header className="flex shrink-0 items-center gap-3 border-b border-zinc-800 px-4 py-2">
-        <Link href="/" className="text-zinc-400 hover:text-zinc-200 text-sm">
+      <header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 px-4 py-2">
+        <Link href="/" className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 text-sm">
           ← Databases
         </Link>
-        <span className="text-zinc-600">/</span>
+        <span className="text-zinc-300 dark:text-zinc-600">/</span>
         <span className="text-sm font-medium truncate">{dbName}</span>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex items-center gap-2">
+          <ThemeToggle />
           <button
             onClick={() => runQuery()}
             disabled={!db || running}
-            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors"
+            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors"
           >
             {running ? "Running…" : "Run"}
           </button>
@@ -190,13 +194,14 @@ export function DbViewer({ dbName }: { dbName: string }) {
         {/* Main area */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* SQL editor */}
-          <div className="shrink-0 border-b border-zinc-800" style={{ height: "200px" }}>
+          <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800" style={{ height: "200px" }}>
             <CodeMirrorEditor
               value={sqlText}
               onChange={setSqlText}
               onSelectionChange={(s) => { selectionRef.current = s; }}
               tables={tables}
               columns={columns}
+              theme={theme}
             />
           </div>
 
@@ -205,7 +210,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
             {result ? (
               <ResultsGrid result={result} />
             ) : (
-              <div className="flex h-full items-center justify-center text-zinc-600 text-sm">
+              <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600 text-sm">
                 {db ? "Run a query to see results" : "Loading database…"}
               </div>
             )}
