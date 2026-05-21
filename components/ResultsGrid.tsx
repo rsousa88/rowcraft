@@ -63,6 +63,7 @@ function applySortFilter(
 interface Props {
   result: QueryResult;
   activeTable?: string | null;
+  tableTotal?: number;     // total rows in the table (from COUNT(*), ignores LIMIT)
   rowids?: number[];
   onEditRow?: (rowid: number, values: Record<string, string | null>) => void;
   onDeleteRow?: (rowid: number, msg: string) => void;
@@ -70,7 +71,7 @@ interface Props {
 }
 
 export function ResultsGrid({
-  result, activeTable, rowids, onEditRow, onDeleteRow, onCreateRow,
+  result, activeTable, tableTotal, rowids, onEditRow, onDeleteRow, onCreateRow,
 }: Props) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
@@ -191,7 +192,14 @@ export function ResultsGrid({
           className="text-xs rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-2 py-1 w-40 focus:outline-none focus:ring-1 focus:ring-emerald-500"
         />
         <span className="text-xs text-zinc-400 dark:text-zinc-500 tabular-nums">
-          {filter ? `${totalFiltered.toLocaleString()} / ` : ""}{result.rows.length.toLocaleString()} rows
+          {filter
+            ? `${totalFiltered.toLocaleString()} matching / ${result.rows.length.toLocaleString()} loaded`
+            : result.rows.length.toLocaleString() + " rows"}
+          {tableTotal != null && tableTotal > result.rows.length && (
+            <span className="ml-1 text-zinc-300 dark:text-zinc-600">
+              ({tableTotal.toLocaleString()} total in table)
+            </span>
+          )}
         </span>
 
         {/* Freeze */}

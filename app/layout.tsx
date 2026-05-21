@@ -15,8 +15,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Rowcraft",
-  description: "SQLite viewer and editor",
+  title: { default: "Rowcraft", template: "%s · Rowcraft" },
+  description: "SQLite viewer and editor — browse tables, run queries, edit data",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export default function RootLayout({

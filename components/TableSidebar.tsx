@@ -87,7 +87,7 @@ export function TableSidebar({
                 className="ml-1 flex-1 text-left text-sm truncate text-zinc-700 dark:text-zinc-200 hover:text-zinc-900 dark:hover:text-white"
                 onClick={() => {
                   onTableSelect(table);
-                  setExpanded((prev) => { const next = new Set(prev); next.add(table); return next; });
+                  setExpanded(new Set([table])); // collapse others, expand selected
                 }}
               >
                 {table}

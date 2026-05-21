@@ -3,6 +3,7 @@ import { UserButton } from "@clerk/nextjs";
 import { createSupabaseAdmin } from "@/lib/supabase";
 import { DatabaseList } from "@/components/DatabaseList";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Logo } from "@/components/Logo";
 
 async function getDatabases(userId: string) {
   const supabase = createSupabaseAdmin();
@@ -20,7 +21,7 @@ export default async function HomePage() {
   return (
     <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
       <header className="border-b border-zinc-200 dark:border-zinc-800 px-6 py-4 flex items-center justify-between">
-        <span className="text-lg font-semibold tracking-tight">Rowcraft</span>
+        <Logo size={28} />
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <UserButton />

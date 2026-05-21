@@ -11,6 +11,7 @@ import { useTheme } from "@/components/ThemeProvider";
 import { SavedQueries } from "@/components/SavedQueries";
 import { QueryHistory, pushHistory } from "@/components/QueryHistory";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
+import { Logo } from "@/components/Logo";
 
 const CodeMirrorEditor = dynamic(() => import("@/components/SqlEditor"), { ssr: false });
 
@@ -452,11 +453,11 @@ export function DbViewer({ dbName }: { dbName: string }) {
     <div className="flex h-screen flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-hidden">
       {/* Header */}
       <header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 px-4 py-2">
-        <Link href="/" className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 text-sm">
-          ← Databases
+        <Link href="/" className="hover:opacity-80 transition-opacity">
+          <Logo size={22} />
         </Link>
         <span className="text-zinc-300 dark:text-zinc-600">/</span>
-        <span className="text-sm font-medium truncate">{dbName}</span>
+        <span className="text-sm font-medium truncate text-zinc-600 dark:text-zinc-400">{dbName}</span>
         <div className="ml-auto flex items-center gap-2">
           {/* Import CSV */}
           <label
@@ -537,6 +538,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
               <ResultsGrid
                 result={result}
                 activeTable={activeTable}
+                tableTotal={activeTable ? rowCounts[activeTable] : undefined}
                 rowids={isTableView ? rowids : undefined}
                 onEditRow={isTableView ? handleEditRow : undefined}
                 onDeleteRow={isTableView ? handleDeleteRow : undefined}
