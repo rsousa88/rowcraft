@@ -12,7 +12,7 @@ async function getDatabases(userId: string) {
   });
   if (error) return [];
   return (data ?? []).filter(
-    (f) => !f.name.endsWith(".groups.json") && !f.name.endsWith(".queries.json")
+    (f) => !f.name.endsWith(".groups.json") && !f.name.endsWith(".queries.json") && !f.name.endsWith(".deps.json")
   );
 }
 

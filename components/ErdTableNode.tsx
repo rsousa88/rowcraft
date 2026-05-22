@@ -24,6 +24,7 @@ export interface TableNodeData {
   columns: ColumnInfo[];
   rowCount?: number;
   collapsed?: boolean;
+  isDesignMode?: boolean;
   [key: string]: unknown;
 }
 
@@ -110,30 +111,35 @@ export function ErdTableNode({
         )}
       </div>
 
-      {/* Handles — always rendered so edges don't disappear when collapsed.
-          Position animates between header midpoint (collapsed) and column row (expanded). */}
+      {/* FK handles — always rendered, not connectable (display only) */}
       {data.columns.map((col, i) => (
         <span key={col.name}>
           {col.isReferenced && (
-            <Handle
-              type="target"
-              position={Position.Left}
-              id={`tgt-${col.name}`}
-              style={handleStyle(i, collapsed)}
-              isConnectable={false}
-            />
+            <Handle type="target" position={Position.Left} id={`tgt-${col.name}`} style={handleStyle(i, collapsed)} isConnectable={false} />
           )}
           {col.isFkSource && (
-            <Handle
-              type="source"
-              position={Position.Right}
-              id={`src-${col.name}`}
-              style={handleStyle(i, collapsed)}
-              isConnectable={false}
-            />
+            <Handle type="source" position={Position.Right} id={`src-${col.name}`} style={handleStyle(i, collapsed)} isConnectable={false} />
           )}
         </span>
       ))}
+
+      {/* Sequence Designer handles — large blue dots, only visible and connectable in design mode */}
+      {data.isDesignMode && (
+        <>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="seq-tgt"
+            style={{ top: "50%", left: -8, width: 16, height: 16, background: "#3b82f6", border: "2.5px solid white", borderRadius: "50%", cursor: "crosshair", zIndex: 10 }}
+          />
+          <Handle
+            type="source"
+            position={Position.Right}
+            id="seq-src"
+            style={{ top: "50%", right: -8, width: 16, height: 16, background: "#3b82f6", border: "2.5px solid white", borderRadius: "50%", cursor: "crosshair", zIndex: 10 }}
+          />
+        </>
+      )}
 
       {/* Column rows — only rendered when expanded */}
       {!collapsed && (
