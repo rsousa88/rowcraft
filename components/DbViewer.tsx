@@ -32,7 +32,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
   const [tables, setTables] = useState<string[]>([]);
   const [columns, setColumns] = useState<Record<string, string[]>>({});
   const [selectedCols, setSelectedCols] = useState<Record<string, Set<string>>>({});
-  const [sqlText, setSqlText] = useState("SELECT * FROM sqlite_master WHERE type='table';");
+  const [sqlText, setSqlText] = useState("");
   const [result, setResult] = useState<QueryResult | null>(null);
   const [rowids, setRowids] = useState<number[] | undefined>(undefined);
   const [isTableView, setIsTableView] = useState(false);
@@ -117,7 +117,6 @@ export function DbViewer({ dbName }: { dbName: string }) {
         }
         setColumns(colMap);
         setSelectedCols(selMap);
-        setSqlText(`SELECT * FROM "${tableNames[0] ?? "sqlite_master"}" LIMIT 100;`);
 
         // Row count badges — non-blocking, best-effort
         const counts: Record<string, number> = {};
@@ -142,11 +141,11 @@ export function DbViewer({ dbName }: { dbName: string }) {
   function buildQuery(table: string, sel: Set<string>, allCols: string[]) {
     const allSelected = allCols.every((c) => sel.has(c));
     if (allSelected || sel.size === 0) {
-      return `SELECT *\nFROM "${table}"\nLIMIT 100;`;
+      return `SELECT *\nFROM "${table}";`;
     }
     const ordered = allCols.filter((c) => sel.has(c));
     const colLines = ordered.map((c) => `  "${c}"`).join(",\n");
-    return `SELECT\n${colLines}\nFROM "${table}"\nLIMIT 100;`;
+    return `SELECT\n${colLines}\nFROM "${table}";`;
   }
 
   function execQuery(q: string, tableView = false, table?: string) {
@@ -706,7 +705,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
                 />
               ) : (
                 <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600 text-sm">
-                  {db ? "Run a query to see results" : "Loading database…"}
+                  {db ? "Select a table from the sidebar, or type a query and press ▶ Run" : "Loading database…"}
                 </div>
               )}
             </div>

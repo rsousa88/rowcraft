@@ -20,14 +20,26 @@ interface Props {
 
 // Always-on completion source for table/column names — fires on any word match
 // without relying on SQL syntax-tree context detection (which often misses partial SQL).
+// Table names are inserted with double quotes; column names are inserted as-is.
 function makeSchemaSource(tables: string[], columns: Record<string, string[]>) {
   return (ctx: CompletionContext) => {
     const word = ctx.matchBefore(/\w+/);
     if (!word || (word.from === word.to && !ctx.explicit)) return null;
 
+    // If the user already typed an opening double-quote before the word, only
+    // close the quote; otherwise wrap the whole name.
+    const charBefore = ctx.state.sliceDoc(Math.max(0, word.from - 1), word.from);
+    const alreadyOpened = charBefore === '"';
+
     const seen = new Set<string>();
     const opts = [
-      ...tables.map(t => ({ label: t, type: "class" as const, detail: "table", boost: 2 })),
+      ...tables.map(t => ({
+        label: t,
+        apply: alreadyOpened ? `${t}"` : `"${t}"`,
+        type: "class" as const,
+        detail: "table",
+        boost: 2,
+      })),
       ...Object.entries(columns).flatMap(([tbl, cols]) =>
         cols.map(c => ({ label: c, type: "property" as const, detail: tbl }))
       ),
