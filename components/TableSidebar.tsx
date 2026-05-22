@@ -480,12 +480,10 @@ export function TableSidebar({
               else if (dragItem?.type === "table") onDrop(e, group.id);
             }}
           >
-            {/* Group header */}
+            {/* Group header — click anywhere to collapse/expand */}
             <div
-              className="flex items-center gap-1 px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 group/grp cursor-default"
-              draggable
-              onDragStart={(e) => onGroupDragStart(e, group.id)}
-              onDragEnd={onDragEnd}
+              className="flex items-center gap-1.5 px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 group/grp cursor-pointer select-none"
+              onClick={() => !renamingGroup && toggleGroupCollapse(group.id)}
               onDragOver={(e) => {
                 if (dragItem?.type === "table") onDragOver(e, group.id);
               }}
@@ -494,16 +492,35 @@ export function TableSidebar({
                 if (dragItem?.type === "table") onDrop(e, group.id);
               }}
             >
-              {/* Folder icon — click to collapse */}
-              <button
-                className="shrink-0 text-sm leading-none"
-                onClick={() => toggleGroupCollapse(group.id)}
-                title={group.collapsed ? "Expand" : "Collapse"}
+              {/* Drag handle for group reorder — only element that is draggable */}
+              <span
+                draggable
+                onDragStart={(e) => { e.stopPropagation(); onGroupDragStart(e, group.id); }}
+                onDragEnd={onDragEnd}
+                onClick={(e) => e.stopPropagation()}
+                className="opacity-0 group-hover/grp:opacity-100 cursor-grab active:cursor-grabbing text-zinc-300 dark:text-zinc-600 shrink-0 text-xs"
+                title="Drag to reorder group"
               >
-                {group.collapsed ? "📁" : "📂"}
-              </button>
+                ⠿
+              </span>
 
-              {/* Group name — double-click to rename */}
+              {/* Chevron — rotates to show collapsed state */}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`shrink-0 text-zinc-400 dark:text-zinc-500 transition-transform duration-150 ${group.collapsed ? "-rotate-90" : ""}`}
+              >
+                <path d="m6 9 6 6 6-6"/>
+              </svg>
+
+              {/* Group name — double-click to rename, single click bubbles to toggle */}
               {renamingGroup === group.id ? (
                 <input
                   autoFocus
@@ -512,27 +529,28 @@ export function TableSidebar({
                   onChange={(e) => setRenameGroupValue(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") renameGroup(group.id, renameGroupValue); if (e.key === "Escape") setRenamingGroup(null); }}
                   onBlur={() => renameGroup(group.id, renameGroupValue)}
+                  onClick={(e) => e.stopPropagation()}
                   className="flex-1 min-w-0 text-xs px-1 py-0.5 rounded border border-emerald-400 dark:border-emerald-600 bg-white dark:bg-zinc-900 focus:outline-none"
                 />
               ) : (
                 <span
-                  className="flex-1 text-xs font-medium text-zinc-600 dark:text-zinc-300 truncate select-none"
-                  onDoubleClick={() => { setRenamingGroup(group.id); setRenameGroupValue(group.name); }}
-                  title="Double-click to rename"
+                  className="flex-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300 truncate"
+                  onDoubleClick={(e) => { e.stopPropagation(); setRenamingGroup(group.id); setRenameGroupValue(group.name); }}
+                  title="Click to collapse · Double-click to rename"
                 >
                   {group.name}
                 </span>
               )}
 
               <span className="text-[10px] text-zinc-400 dark:text-zinc-600 tabular-nums shrink-0">
-                {group.tables.length}
+                {group.tables.filter(t => tables.includes(t)).length}
               </span>
 
-              {/* Delete group (hover) */}
+              {/* Delete (hover only) */}
               <button
-                onClick={() => deleteGroup(group.id)}
+                onClick={(e) => { e.stopPropagation(); deleteGroup(group.id); }}
                 className="opacity-0 group-hover/grp:opacity-100 text-zinc-400 hover:text-red-500 text-xs px-0.5 transition-opacity"
-                title="Delete group (tables move to Ungrouped)"
+                title="Delete group — tables return to Ungrouped"
               >
                 ✕
               </button>
