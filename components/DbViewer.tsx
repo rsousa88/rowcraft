@@ -612,7 +612,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
         <div className="flex flex-1 flex-col overflow-hidden">
           {view === "schema" ? (
             /* ── Schema / ER diagram view ── */
-            <ErdDiagram db={db} rowCounts={rowCounts} />
+            <ErdDiagram db={db} dbName={dbName} rowCounts={rowCounts} />
           ) : (
             /* ── Query view ── */
             <>
