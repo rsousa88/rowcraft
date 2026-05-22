@@ -16,7 +16,7 @@ export async function GET() {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   // Filter out sidecar metadata files
   const dbs = (data ?? []).filter(
-    (f) => !f.name.endsWith(".groups.json") && !f.name.endsWith(".queries.json") && !f.name.endsWith(".deps.json")
+    (f) => !f.name.endsWith(".groups.json") && !f.name.endsWith(".queries.json") && !f.name.endsWith(".deps.json") && !f.name.endsWith(".layout.json")
   );
   return NextResponse.json(dbs);
 }

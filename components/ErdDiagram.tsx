@@ -26,6 +26,7 @@ import {
   ErdTableNode,
   NODE_WIDTH,
   collapsedHeight,
+  expandedHeight,
   type TableNodeData,
   type ColumnInfo,
 } from "@/components/ErdTableNode";
@@ -60,7 +61,8 @@ interface GroupNodeData { label: string; palette: typeof GROUP_PALETTES[number];
 function GroupBackgroundNode({ data }: { data: GroupNodeData }) {
   const { palette } = data;
   return (
-    <div className="w-full h-full rounded-2xl border-2" style={{ background: palette.bg, borderColor: palette.border }}>
+    // pointer-events-none so child table nodes receive all mouse/drag events
+    <div className="w-full h-full rounded-2xl border-2 pointer-events-none" style={{ background: palette.bg, borderColor: palette.border }}>
       <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider select-none" style={{ color: palette.label }}>
         {data.label}
       </div>
@@ -165,7 +167,12 @@ function gridLayout(
     const numRows = Math.ceil(members.length / COLS_PER_ROW);
     const numCols = Math.min(members.length, COLS_PER_ROW);
     const innerW = numCols * NODE_WIDTH + (numCols - 1) * H_GAP;
-    const innerH = numRows * tableH + (numRows - 1) * V_GAP;
+    // Use the tallest possible expanded height so nodes always expand downward (no upward clamping)
+    const maxMemberH = Math.max(...members.map(t => {
+      const tbl = schema.find(s => s.name === t);
+      return tbl ? expandedHeight(tbl.columns.length) : tableH;
+    }));
+    const innerH = numRows * maxMemberH + (numRows - 1) * V_GAP;
     const groupW = innerW + GRP_PAD_X * 2;
     const groupH = innerH + GRP_PAD_TOP + GRP_PAD_BOTTOM;
 
@@ -294,28 +301,69 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
   const [isDesignMode, setIsDesignMode] = useState(false);
   const [storedDeps, setStoredDeps] = useState<DepEdge[]>([]);
   const savePendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Refs so layout effect can read current values without being re-triggered
+  const saveLayoutPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Refs so effects can read current values without being re-triggered
   const storedDepsRef = useRef<DepEdge[]>([]);
   const schemaRef = useRef<TableSchema[]>([]);
   const isDesignModeRef = useRef(false);
-  const userMovedRef = useRef(false); // true once user drags anything
+  // Saved layout positions (fetched from server, applied once on load)
+  const savedLayoutRef = useRef<Record<string, { x: number; y: number }> | null>(null);
 
   useEffect(() => { storedDepsRef.current = storedDeps; }, [storedDeps]);
   useEffect(() => { isDesignModeRef.current = isDesignMode; }, [isDesignMode]);
 
-  // Fetch groups + deps
+  function saveLayout(positions: Record<string, { x: number; y: number }>) {
+    if (saveLayoutPendingRef.current) clearTimeout(saveLayoutPendingRef.current);
+    saveLayoutPendingRef.current = setTimeout(() => {
+      fetch(`/api/databases/${encodeURIComponent(dbName)}/layout`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ positions }),
+      }).catch(() => {});
+    }, 800);
+  }
+
+  // On drag end: save all node positions to server
+  const onNodeDragStop = useCallback(
+    (_: React.MouseEvent, _node: Node, allNodes: Node[]) => {
+      const positions: Record<string, { x: number; y: number }> = {};
+      for (const n of allNodes) {
+        if (n.type === "tableNode" || n.type === "groupNode") {
+          positions[n.id] = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
+        }
+      }
+      savedLayoutRef.current = positions; // update ref so future rebuilds use saved positions
+      saveLayout(positions);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dbName]
+  );
+
+  // Fetch groups, deps, and saved layout in parallel
   useEffect(() => {
     if (!dbName) return;
-    userMovedRef.current = false; // new database → reset drag state
+    savedLayoutRef.current = null; // reset on database change
     const enc = encodeURIComponent(dbName);
     Promise.all([
       fetch(`/api/databases/${enc}/groups`).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch(`/api/databases/${enc}/deps`).then(r => r.ok ? r.json() : []).catch(() => []),
-    ]).then(([g, d]) => {
+      fetch(`/api/databases/${enc}/layout`).then(r => r.ok ? r.json() : {}).catch(() => {}),
+    ]).then(([g, d, l]) => {
       setGroups(Array.isArray(g) ? g : []);
       setStoredDeps(Array.isArray(d) ? d : []);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      savedLayoutRef.current = (l && typeof (l as any).positions === "object") ? (l as any).positions : null;
     });
   }, [dbName]);
+
+  // Apply saved positions on top of auto-computed layout
+  function applyPositions(nodes: Node[]): Node[] {
+    const saved = savedLayoutRef.current;
+    if (!saved) return nodes;
+    return nodes.map(n => {
+      const pos = saved[n.id];
+      return pos ? { ...n, position: pos } : n;
+    });
+  }
 
   // Rebuild layout — does NOT depend on storedDeps (prevents layout reset on dep changes).
   // Uses storedDepsRef so it still includes current deps on the initial build.
@@ -328,12 +376,9 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
       .filter(d => schema.find(t => t.name === d.source) && schema.find(t => t.name === d.target))
       .map(d => depToEdge(d, isDesignModeRef.current, handleDepDelete));
 
-    if (!userMovedRef.current) {
-      // Auto layout — user hasn't dragged anything yet
-      const { nodes: tableNodes, groupNodes } = gridLayout(schema, groups, isDesignModeRef.current, rowCounts);
-      setNodes([...groupNodes, ...tableNodes]);
-    }
-    // Always rebuild edges (they don't have positions)
+    // Build auto layout, then overlay any saved positions
+    const { nodes: tableNodes, groupNodes } = gridLayout(schema, groups, isDesignModeRef.current, rowCounts);
+    setNodes(applyPositions([...groupNodes, ...tableNodes]));
     setEdges([...fkEdges, ...depEdges]);
     setTableCount(schema.length);
     setFkCount(fkEdges.length);
@@ -402,14 +447,6 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbName]);
 
-  // Track when user drags a node (so we stop auto-layouting)
-  const onNodesChangeTracked = useCallback((changes: Parameters<typeof onNodesChange>[0]) => {
-    if (!userMovedRef.current) {
-      const hasDrag = changes.some(c => c.type === "position" && !c.dragging && c.position);
-      if (hasDrag) userMovedRef.current = true;
-    }
-    onNodesChange(changes);
-  }, [onNodesChange]);
 
   function toggleDesignMode() {
     const deps = storedDepsRef.current;
@@ -431,7 +468,8 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
     <div className="h-full w-full relative">
       <ReactFlow
         nodes={nodes} edges={edges}
-        onNodesChange={onNodesChangeTracked}
+        onNodesChange={onNodesChange}
+        onNodeDragStop={onNodeDragStop}
         onEdgesChange={onEdgesChange}
         onConnect={isDesignMode ? handleConnect : undefined}
         nodeTypes={nodeTypes}
