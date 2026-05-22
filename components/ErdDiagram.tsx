@@ -390,8 +390,8 @@ export function ErdDiagram({ db, dbName, rowCounts, visible }: Props) {
   }
 
   function saveDisplayPrefs(grps: boolean) {
-    const current = savedLayoutRef.current ?? {};
-    const payload: LayoutData = { ...current, display: { groups: grps, tables: true } };
+    if (!savedLayoutRef.current) return;
+    const payload: LayoutData = { ...savedLayoutRef.current, display: { groups: grps, tables: true } };
     savedLayoutRef.current = payload;
     putLayout(payload);
   }
@@ -484,11 +484,11 @@ export function ErdDiagram({ db, dbName, rowCounts, visible }: Props) {
       const next = new Set(prev);
       next.add(id);
       hiddenTablesRef.current = next;
-      // Save immediately
-      const current = savedLayoutRef.current ?? {};
-      const payload: LayoutData = { ...current, hiddenTables: [...next] };
-      savedLayoutRef.current = payload;
-      putLayout(payload);
+      if (savedLayoutRef.current) {
+        const payload: LayoutData = { ...savedLayoutRef.current, hiddenTables: [...next] };
+        savedLayoutRef.current = payload;
+        putLayout(payload);
+      }
       return next;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -499,10 +499,11 @@ export function ErdDiagram({ db, dbName, rowCounts, visible }: Props) {
       const next = new Set(prev);
       next.delete(id);
       hiddenTablesRef.current = next;
-      const current = savedLayoutRef.current ?? {};
-      const payload: LayoutData = { ...current, hiddenTables: [...next] };
-      savedLayoutRef.current = payload;
-      putLayout(payload);
+      if (savedLayoutRef.current) {
+        const payload: LayoutData = { ...savedLayoutRef.current, hiddenTables: [...next] };
+        savedLayoutRef.current = payload;
+        putLayout(payload);
+      }
       return next;
     });
   }
@@ -568,8 +569,11 @@ export function ErdDiagram({ db, dbName, rowCounts, visible }: Props) {
 
   useEffect(() => {
     setEdges(es => es.map(e => e.type === "dependencyEdge" ? { ...e, data: { ...e.data, edgeRounded } } : e));
-    const current = savedLayoutRef.current ?? {};
-    const payload: LayoutData = { ...current, edgeRounded };
+    // Guard: don't save before the layout has been loaded from the server.
+    // Without this, the effect fires on mount and PUTs { edgeRounded: true }
+    // which wipes all saved positions from the layout file.
+    if (!savedLayoutRef.current) return;
+    const payload: LayoutData = { ...savedLayoutRef.current, edgeRounded };
     savedLayoutRef.current = payload;
     putLayout(payload);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -583,8 +587,8 @@ export function ErdDiagram({ db, dbName, rowCounts, visible }: Props) {
       depToEdge(d, isDesignModeRef.current, edgeRoundedRef.current, edgeSpread, handleDepDelete)
     );
     setEdges([...fkEdges, ...depEdges]);
-    const current = savedLayoutRef.current ?? {};
-    const payload: LayoutData = { ...current, edgeSpread };
+    if (!savedLayoutRef.current) return;
+    const payload: LayoutData = { ...savedLayoutRef.current, edgeSpread };
     savedLayoutRef.current = payload;
     putLayout(payload);
   // eslint-disable-next-line react-hooks/exhaustive-deps
