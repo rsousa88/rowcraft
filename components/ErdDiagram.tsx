@@ -12,7 +12,6 @@ import {
   Panel,
   useNodesState,
   useEdgesState,
-  useReactFlow,
   BaseEdge,
   EdgeLabelRenderer,
   getSmoothStepPath,
@@ -72,7 +71,6 @@ function GroupBackgroundNode({ data }: { data: GroupNodeData }) {
 // ── dependency edge ───────────────────────────────────────────────────────────
 
 function DependencyEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style, data }: EdgeProps) {
-  const { setEdges } = useReactFlow();
   const [edgePath, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
 
   return (
@@ -82,7 +80,7 @@ function DependencyEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition
         <EdgeLabelRenderer>
           <div className="nodrag nopan absolute" style={{ transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`, pointerEvents: "all" }}>
             <button
-              onClick={() => setEdges((es) => es.filter((e) => e.id !== id))}
+              onClick={() => (data.onDelete as (id: string) => void)?.(id)}
               className="w-5 h-5 rounded-full bg-white dark:bg-zinc-900 border border-red-300 dark:border-red-700 text-red-500 text-[10px] flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors shadow-sm"
               title="Remove dependency"
             >
@@ -155,8 +153,8 @@ function gridLayout(
   const allNodes: Node[] = [];
   const groupNodes: Node[] = [];
 
-  // Build group nodes + child table nodes
-  let cursorX = 0;
+  // Groups stack VERTICALLY — one per "line", no horizontal crowding
+  let cursorY = 0;
 
   for (let gi = 0; gi < groups.length; gi++) {
     const group = groups[gi];
@@ -176,7 +174,7 @@ function gridLayout(
     groupNodes.push({
       id: groupId,
       type: "groupNode",
-      position: { x: cursorX, y: 0 },
+      position: { x: 0, y: cursorY },   // ← vertical stacking
       style: { width: groupW, height: groupH, zIndex: -1 },
       draggable: true,
       selectable: false,
@@ -207,17 +205,15 @@ function gridLayout(
       });
     });
 
-    cursorX += groupW + GRP_MARGIN;
+    cursorY += groupH + GRP_MARGIN;   // ← advance downward
   }
 
-  // Ungrouped tables — flat row below (or on their own)
+  // Ungrouped tables — row(s) below all groups
   const assignedTables = new Set(groups.flatMap((g) => g.tables));
   const ungrouped = schema.filter((t) => !assignedTables.has(t.name));
 
   if (ungrouped.length > 0) {
-    const ungroupedY = groupNodes.length > 0
-      ? Math.max(...groupNodes.map((n) => (n.style?.height as number ?? 0))) + GRP_MARGIN
-      : 0;
+    const ungroupedY = cursorY;
 
     ungrouped.forEach((tbl, idx) => {
       const col = idx % COLS_PER_ROW;
@@ -263,7 +259,7 @@ function buildFkEdges(schema: TableSchema[]): Edge[] {
   return edges;
 }
 
-function depToEdge(dep: DepEdge, isDesignMode: boolean): Edge {
+function depToEdge(dep: DepEdge, isDesignMode: boolean, onDelete?: (id: string) => void): Edge {
   return {
     id: dep.id,
     source: dep.source, sourceHandle: "seq-src",
@@ -271,7 +267,7 @@ function depToEdge(dep: DepEdge, isDesignMode: boolean): Edge {
     type: "dependencyEdge", animated: true,
     style: { stroke: "#3b82f6", strokeWidth: 2, strokeDasharray: "8 4" },
     markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6", width: 14, height: 14 },
-    data: { isDesignMode },
+    data: { isDesignMode, onDelete },
     zIndex: 3,
   };
 }
@@ -298,10 +294,19 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
   const [isDesignMode, setIsDesignMode] = useState(false);
   const [storedDeps, setStoredDeps] = useState<DepEdge[]>([]);
   const savePendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Refs so layout effect can read current values without being re-triggered
+  const storedDepsRef = useRef<DepEdge[]>([]);
+  const schemaRef = useRef<TableSchema[]>([]);
+  const isDesignModeRef = useRef(false);
+  const userMovedRef = useRef(false); // true once user drags anything
+
+  useEffect(() => { storedDepsRef.current = storedDeps; }, [storedDeps]);
+  useEffect(() => { isDesignModeRef.current = isDesignMode; }, [isDesignMode]);
 
   // Fetch groups + deps
   useEffect(() => {
     if (!dbName) return;
+    userMovedRef.current = false; // new database → reset drag state
     const enc = encodeURIComponent(dbName);
     Promise.all([
       fetch(`/api/databases/${enc}/groups`).then(r => r.ok ? r.json() : []).catch(() => []),
@@ -312,26 +317,50 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
     });
   }, [dbName]);
 
-  // Rebuild when db / groups / deps change
+  // Rebuild layout — does NOT depend on storedDeps (prevents layout reset on dep changes).
+  // Uses storedDepsRef so it still includes current deps on the initial build.
   useEffect(() => {
     if (!db) return;
     const schema = extractSchema(db);
-    const { nodes: tableNodes, groupNodes } = gridLayout(schema, groups, isDesignMode, rowCounts);
+    schemaRef.current = schema;
     const fkEdges = buildFkEdges(schema);
-    const depEdges = storedDeps
+    const depEdges = storedDepsRef.current
       .filter(d => schema.find(t => t.name === d.source) && schema.find(t => t.name === d.target))
-      .map(d => depToEdge(d, isDesignMode));
-    setNodes([...groupNodes, ...tableNodes]);
+      .map(d => depToEdge(d, isDesignModeRef.current, handleDepDelete));
+
+    if (!userMovedRef.current) {
+      // Auto layout — user hasn't dragged anything yet
+      const { nodes: tableNodes, groupNodes } = gridLayout(schema, groups, isDesignModeRef.current, rowCounts);
+      setNodes([...groupNodes, ...tableNodes]);
+    }
+    // Always rebuild edges (they don't have positions)
     setEdges([...fkEdges, ...depEdges]);
     setTableCount(schema.length);
     setFkCount(fkEdges.length);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, rowCounts, groups, storedDeps]);
+  }, [db, rowCounts, groups]); // storedDeps intentionally omitted
 
-  // Sync isDesignMode into node/edge data without rebuilding layout
+  // Sync dep edges only — never touches nodes, preserves layout
+  useEffect(() => {
+    if (schemaRef.current.length === 0) return;
+    const depEdges = storedDeps
+      .filter(d => schemaRef.current.find(t => t.name === d.source) && schemaRef.current.find(t => t.name === d.target))
+      .map(d => depToEdge(d, isDesignModeRef.current, handleDepDelete));
+    setEdges(prev => {
+      const fkEdges = prev.filter(e => e.type !== "dependencyEdge");
+      // Idempotency: skip if dep IDs are identical
+      const prevIds = prev.filter(e => e.type === "dependencyEdge").map(e => e.id).sort().join(",");
+      const newIds = depEdges.map(e => e.id).sort().join(",");
+      if (prevIds === newIds) return prev;
+      return [...fkEdges, ...depEdges];
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storedDeps]);
+
+  // Sync isDesignMode into existing node/edge data — never rebuilds layout
   useEffect(() => {
     setNodes(nds => nds.map(n => n.type === "tableNode" ? { ...n, data: { ...n.data, isDesignMode } } : n));
-    setEdges(es => es.map(e => e.type === "dependencyEdge" ? { ...e, data: { ...e.data, isDesignMode } } : e));
+    setEdges(es => es.map(e => e.type === "dependencyEdge" ? { ...e, data: { ...e.data, isDesignMode, onDelete: handleDepDelete } } : e));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDesignMode]);
 
@@ -345,35 +374,45 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
     }, 600);
   }
 
-  const handleConnect = useCallback((connection: Connection) => {
-    if (!connection.source || !connection.target || connection.source === connection.target) return;
-    const id = `dep-${connection.source}->${connection.target}`;
-    setEdges(es => {
-      if (es.some(e => e.id === id)) return es;
-      const newEdge = depToEdge({ id, source: connection.source!, target: connection.target! }, true);
-      const updated = [...es, newEdge];
-      const deps = updated.filter(e => e.type === "dependencyEdge").map(e => ({ id: e.id, source: e.source, target: e.target }));
-      setStoredDeps(deps);
-      saveDeps(deps);
+  // Stable callback for dep edge deletion (from ✕ button in DependencyEdge)
+  const handleDepDelete = useCallback((id: string) => {
+    setEdges(es => es.filter(e => e.id !== id));
+    setStoredDeps(prev => {
+      const updated = prev.filter(d => d.id !== id);
+      saveDeps(updated);
       return updated;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbName]);
 
-  // Save when dep edges are deleted
-  useEffect(() => {
-    const deps = edges.filter(e => e.type === "dependencyEdge").map(e => ({ id: e.id, source: e.source, target: e.target }));
-    const storedIds = storedDeps.map(d => d.id).sort().join(",");
-    const currentIds = deps.map(d => d.id).sort().join(",");
-    if (storedIds !== currentIds) {
-      setStoredDeps(deps);
-      saveDeps(deps);
-    }
+  const handleConnect = useCallback((connection: Connection) => {
+    if (!connection.source || !connection.target || connection.source === connection.target) return;
+    const id = `dep-${connection.source}->${connection.target}`;
+    setEdges(es => {
+      if (es.some(e => e.id === id)) return es;
+      const newEdge = depToEdge({ id, source: connection.source!, target: connection.target! }, true, handleDepDelete);
+      return [...es, newEdge];
+    });
+    setStoredDeps(prev => {
+      if (prev.some(d => d.id === id)) return prev;
+      const updated = [...prev, { id, source: connection.source!, target: connection.target! }];
+      saveDeps(updated);
+      return updated;
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edges]);
+  }, [dbName]);
+
+  // Track when user drags a node (so we stop auto-layouting)
+  const onNodesChangeTracked = useCallback((changes: Parameters<typeof onNodesChange>[0]) => {
+    if (!userMovedRef.current) {
+      const hasDrag = changes.some(c => c.type === "position" && !c.dragging && c.position);
+      if (hasDrag) userMovedRef.current = true;
+    }
+    onNodesChange(changes);
+  }, [onNodesChange]);
 
   function toggleDesignMode() {
-    const deps = edges.filter(e => e.type === "dependencyEdge").map(e => ({ id: e.id, source: e.source, target: e.target }));
+    const deps = storedDepsRef.current;
     saveDeps(deps);
     setIsDesignMode(m => !m);
   }
@@ -392,7 +431,7 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
     <div className="h-full w-full relative">
       <ReactFlow
         nodes={nodes} edges={edges}
-        onNodesChange={onNodesChange}
+        onNodesChange={onNodesChangeTracked}
         onEdgesChange={onEdgesChange}
         onConnect={isDesignMode ? handleConnect : undefined}
         nodeTypes={nodeTypes}
@@ -404,6 +443,8 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
         colorMode={isDark ? "dark" : "light"}
         edgesFocusable={isDesignMode}
         nodesDraggable
+        snapToGrid
+        snapGrid={[10, 10]}
         deleteKeyCode={isDesignMode ? "Delete" : null}
         connectionMode={"loose" as never}
       >
