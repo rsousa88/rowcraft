@@ -43,32 +43,28 @@ function GroupBackgroundNode({ data }: { data: GroupNodeData }) {
           {data.label}
         </div>
       </div>
-      {/* Sequence Designer handles — always in DOM for edge routing; visible only in design mode */}
+      {/* Sequence Designer handles — always in DOM; no positional override in view mode */}
       <Handle
         type="target" position={Position.Left} id="grp-seq-tgt"
         isConnectable={!!data.isDesignMode}
-        style={{
-          top: "50%", left: data.isDesignMode ? -8 : "50%",
-          width: data.isDesignMode ? 16 : 4, height: data.isDesignMode ? 16 : 4,
-          background: data.isDesignMode ? "#3b82f6" : "transparent",
-          border: data.isDesignMode ? "2.5px solid white" : "none",
-          borderRadius: "50%", cursor: data.isDesignMode ? "crosshair" : "default",
-          opacity: data.isDesignMode ? 1 : 0, pointerEvents: data.isDesignMode ? "all" : "none",
-          zIndex: 10, transform: "translateY(-50%)",
-        }}
+        style={data.isDesignMode ? {
+          top: "50%", left: -4,
+          width: 8, height: 8,
+          background: "#3b82f6", border: "2px solid white",
+          borderRadius: "50%", cursor: "crosshair",
+          opacity: 1, pointerEvents: "all", zIndex: 10, transform: "translateY(-50%)",
+        } : { width: 1, height: 1, opacity: 0, pointerEvents: "none", zIndex: 10 }}
       />
       <Handle
         type="source" position={Position.Right} id="grp-seq-src"
         isConnectable={!!data.isDesignMode}
-        style={{
-          top: "50%", right: data.isDesignMode ? -8 : "50%",
-          width: data.isDesignMode ? 16 : 4, height: data.isDesignMode ? 16 : 4,
-          background: data.isDesignMode ? "#3b82f6" : "transparent",
-          border: data.isDesignMode ? "2.5px solid white" : "none",
-          borderRadius: "50%", cursor: data.isDesignMode ? "crosshair" : "default",
-          opacity: data.isDesignMode ? 1 : 0, pointerEvents: data.isDesignMode ? "all" : "none",
-          zIndex: 10, transform: "translateY(-50%)",
-        }}
+        style={data.isDesignMode ? {
+          top: "50%", right: -4,
+          width: 8, height: 8,
+          background: "#3b82f6", border: "2px solid white",
+          borderRadius: "50%", cursor: "crosshair",
+          opacity: 1, pointerEvents: "all", zIndex: 10, transform: "translateY(-50%)",
+        } : { width: 1, height: 1, opacity: 0, pointerEvents: "none", zIndex: 10 }}
       />
     </div>
   );
@@ -83,10 +79,23 @@ function DependencyEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition
       <BaseEdge path={edgePath} markerEnd={markerEnd as string} style={style as React.CSSProperties} />
       {data?.isDesignMode && (
         <EdgeLabelRenderer>
-          <div className="nodrag nopan absolute" style={{ transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`, pointerEvents: "all" }}>
-            <button onClick={() => (data.onDelete as (id: string) => void)?.(id)}
+          {/* position: fixed pulls the button out of any clipping parent and places it above everything */}
+          <div
+            className="nodrag nopan"
+            style={{
+              position: "absolute",
+              transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`,
+              pointerEvents: "all",
+              zIndex: 9999,
+            }}
+          >
+            <button
+              onClick={() => (data.onDelete as (id: string) => void)?.(id)}
               className="w-5 h-5 rounded-full bg-white dark:bg-zinc-900 border border-red-300 dark:border-red-700 text-red-500 text-[10px] flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors shadow-sm"
-              title="Remove dependency">✕</button>
+              title="Remove dependency"
+            >
+              ✕
+            </button>
           </div>
         </EdgeLabelRenderer>
       )}

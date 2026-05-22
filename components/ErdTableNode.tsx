@@ -55,8 +55,8 @@ function handleTop(colIndex: number, collapsed: boolean): number {
 function handleStyle(colIndex: number, collapsed: boolean): React.CSSProperties {
   return {
     top: handleTop(colIndex, collapsed),
-    width: 8, height: 8,
-    background: "#10b981", border: "2px solid white", borderRadius: "50%",
+    width: 6, height: 6,        // smaller dots
+    background: "#10b981", border: "1.5px solid white", borderRadius: "50%",
     transition: "top 0.15s ease",
   };
 }
@@ -68,33 +68,13 @@ export function ErdTableNode({ id, data, selected }: { id: string; data: TableNo
   function toggle(e: React.MouseEvent) {
     e.stopPropagation();
     const newCollapsed = !collapsed;
-
-    setNodes(nds => {
-      // 1. Update this node: collapsed state + bring to front when expanded
-      const updated = nds.map(n => {
-        if (n.id !== id) return n;
-        return { ...n, zIndex: newCollapsed ? 1 : 20, data: { ...n.data, collapsed: newCollapsed } };
-      });
-
-      // 2. Dynamically resize the parent group so the node always expands downward
-      if (data.parentGroupId) {
-        const siblings = updated.filter(
-          n => n.parentId === data.parentGroupId && n.type === "tableNode"
-        );
-        const children = siblings.map(s => ({
-          collapsed: (s.data as TableNodeData).collapsed,
-          colCount: ((s.data as TableNodeData).columns ?? []).length,
-        }));
-        const newGroupH = groupHeightForChildren(children);
-        return updated.map(n =>
-          n.id === data.parentGroupId
-            ? { ...n, style: { ...n.style, height: newGroupH } }
-            : n
-        );
-      }
-
-      return updated;
-    });
+    // Update collapsed state and bring expanded nodes to the front.
+    // Group size is NOT changed here — it is set once at initial layout and only
+    // changed when the user manually resizes the group (not on every expand/collapse).
+    setNodes(nds => nds.map(n =>
+      n.id !== id ? n
+        : { ...n, zIndex: newCollapsed ? 1 : 20, data: { ...n.data, collapsed: newCollapsed } }
+    ));
   }
 
   return (
@@ -111,7 +91,7 @@ export function ErdTableNode({ id, data, selected }: { id: string; data: TableNo
       <div
         className="bg-emerald-600 px-3 py-2 flex items-center gap-2 cursor-pointer hover:bg-emerald-700 transition-colors rounded-t-lg"
         onClick={toggle}
-        title={collapsed ? "Click to expand columns" : "Click to collapse"}
+        title={`${data.label}${collapsed ? " — click to expand" : " — click to collapse"}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
           className={`shrink-0 text-emerald-200 transition-transform duration-150 ${collapsed ? "-rotate-90" : ""}`}>
@@ -132,30 +112,34 @@ export function ErdTableNode({ id, data, selected }: { id: string; data: TableNo
 
       {/* Sequence Designer handles — always in the DOM so edge routing works in view mode too.
           Visible + connectable only when isDesignMode; invisible + pointer-events-none otherwise. */}
+      {/* Sequence Designer handles — always in DOM for edge routing.
+          In view mode: no positional overrides so React Flow places them at the node edge (Position.Left/Right).
+          In design mode: sized and coloured as visible interactive dots on the border. */}
       <Handle
         type="target" position={Position.Left} id="seq-tgt"
         isConnectable={!!data.isDesignMode}
-        style={{
-          top: "50%", left: data.isDesignMode ? -8 : "50%",
-          width: data.isDesignMode ? 16 : 4, height: data.isDesignMode ? 16 : 4,
-          background: data.isDesignMode ? "#3b82f6" : "transparent",
-          border: data.isDesignMode ? "2.5px solid white" : "none",
-          borderRadius: "50%", cursor: data.isDesignMode ? "crosshair" : "default",
-          opacity: data.isDesignMode ? 1 : 0, pointerEvents: data.isDesignMode ? "all" : "none",
-          zIndex: 10, transform: "translateY(-50%)",
+        style={data.isDesignMode ? {
+          top: "50%", left: -4,
+          width: 8, height: 8,
+          background: "#3b82f6", border: "2px solid white",
+          borderRadius: "50%", cursor: "crosshair",
+          opacity: 1, pointerEvents: "all", zIndex: 10, transform: "translateY(-50%)",
+        } : {
+          // Invisible, minimal — let React Flow place at the left edge for correct routing
+          width: 1, height: 1, opacity: 0, pointerEvents: "none", zIndex: 10,
         }}
       />
       <Handle
         type="source" position={Position.Right} id="seq-src"
         isConnectable={!!data.isDesignMode}
-        style={{
-          top: "50%", right: data.isDesignMode ? -8 : "50%",
-          width: data.isDesignMode ? 16 : 4, height: data.isDesignMode ? 16 : 4,
-          background: data.isDesignMode ? "#3b82f6" : "transparent",
-          border: data.isDesignMode ? "2.5px solid white" : "none",
-          borderRadius: "50%", cursor: data.isDesignMode ? "crosshair" : "default",
-          opacity: data.isDesignMode ? 1 : 0, pointerEvents: data.isDesignMode ? "all" : "none",
-          zIndex: 10, transform: "translateY(-50%)",
+        style={data.isDesignMode ? {
+          top: "50%", right: -4,
+          width: 8, height: 8,
+          background: "#3b82f6", border: "2px solid white",
+          borderRadius: "50%", cursor: "crosshair",
+          opacity: 1, pointerEvents: "all", zIndex: 10, transform: "translateY(-50%)",
+        } : {
+          width: 1, height: 1, opacity: 0, pointerEvents: "none", zIndex: 10,
         }}
       />
 
@@ -163,15 +147,21 @@ export function ErdTableNode({ id, data, selected }: { id: string; data: TableNo
       {!collapsed && (
         <div className="bg-white dark:bg-zinc-900 rounded-b-lg" style={{ paddingBottom: PADDING_BOTTOM }}>
           {data.columns.map((col) => (
-            <div key={col.name} className="relative flex items-center px-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0" style={{ height: ROW_HEIGHT }}>
-              <span className="shrink-0 w-7 text-[9px] font-bold mr-1.5">
+            <div
+              key={col.name}
+              className="relative flex items-center px-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0"
+              style={{ height: ROW_HEIGHT }}
+              title={`${col.name}${col.type ? ` · ${col.type}` : ""}${col.isPk ? " · Primary Key" : ""}${col.isFkSource ? " · Foreign Key" : ""}${col.isNotNull && !col.isPk ? " · NOT NULL" : ""}`}
+            >
+              <span className="shrink-0 w-6 text-[9px] font-bold mr-1">
                 {col.isPk ? <span className="bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 px-1 py-0.5 rounded">PK</span>
                   : col.isFkSource ? <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded">FK</span>
                   : null}
               </span>
-              <span className="flex-1 text-xs text-zinc-700 dark:text-zinc-200 truncate font-mono">{col.name}</span>
-              <span className="text-[10px] text-zinc-400 dark:text-zinc-500 ml-1 shrink-0 font-mono uppercase">{col.type?.split("(")[0] || "—"}</span>
-              {col.isNotNull && !col.isPk && <span className="ml-1 shrink-0 w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600" title="NOT NULL" />}
+              {/* Reduced font for column names */}
+              <span className="flex-1 text-[10px] text-zinc-700 dark:text-zinc-200 truncate font-mono">{col.name}</span>
+              <span className="text-[9px] text-zinc-400 dark:text-zinc-500 ml-1 shrink-0 font-mono uppercase">{col.type?.split("(")[0] || "—"}</span>
+              {col.isNotNull && !col.isPk && <span className="ml-1 shrink-0 w-1 h-1 rounded-full bg-zinc-300 dark:bg-zinc-600" title="NOT NULL" />}
             </div>
           ))}
         </div>
