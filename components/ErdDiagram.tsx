@@ -4,44 +4,19 @@ import "@xyflow/react/dist/style.css";
 
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  MarkerType,
-  Panel,
-  useNodesState,
-  useEdgesState,
-  BaseEdge,
-  EdgeLabelRenderer,
-  getSmoothStepPath,
-  type Node,
-  type Edge,
-  type EdgeProps,
-  type Connection,
-  BackgroundVariant,
+  ReactFlow, Background, Controls, MiniMap, MarkerType, Panel,
+  useNodesState, useEdgesState,
+  BaseEdge, EdgeLabelRenderer, getSmoothStepPath, Handle, Position,
+  type Node, type Edge, type EdgeProps, type Connection, BackgroundVariant,
 } from "@xyflow/react";
 import type { Database } from "sql.js";
 import {
-  ErdTableNode,
-  NODE_WIDTH,
-  collapsedHeight,
-  expandedHeight,
-  type TableNodeData,
-  type ColumnInfo,
+  ErdTableNode, NODE_WIDTH, collapsedHeight,
+  COLS_PER_ROW, H_GAP, V_GAP, GRP_PAD_X, GRP_PAD_TOP, GRP_PAD_BOTTOM,
+  groupHeightForChildren,
+  type TableNodeData, type ColumnInfo,
 } from "@/components/ErdTableNode";
 import { useTheme } from "@/components/ThemeProvider";
-
-// ── constants ─────────────────────────────────────────────────────────────────
-
-const COLS_PER_ROW = 5;          // max tables per row within a group
-const H_GAP = 40;                 // horizontal gap between tables
-const V_GAP = 40;                 // vertical gap between rows
-const GRP_PAD_X = 32;            // group horizontal padding
-const GRP_PAD_TOP = 44;          // group top padding (room for label)
-const GRP_PAD_BOTTOM = 28;       // group bottom padding
-const GRP_MARGIN = 60;           // spacing between group containers
-const UNGROUPED_X_START = 0;     // where ungrouped tables start
 
 // ── group colours ─────────────────────────────────────────────────────────────
 
@@ -56,16 +31,25 @@ const GROUP_PALETTES = [
 
 // ── group background node ─────────────────────────────────────────────────────
 
-interface GroupNodeData { label: string; palette: typeof GROUP_PALETTES[number]; [key: string]: unknown }
+interface GroupNodeData { label: string; palette: typeof GROUP_PALETTES[number]; isDesignMode?: boolean; [key: string]: unknown }
 
 function GroupBackgroundNode({ data }: { data: GroupNodeData }) {
   const { palette } = data;
   return (
-    // pointer-events-none so child table nodes receive all mouse/drag events
-    <div className="w-full h-full rounded-2xl border-2 pointer-events-none" style={{ background: palette.bg, borderColor: palette.border }}>
-      <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider select-none" style={{ color: palette.label }}>
-        {data.label}
+    <div className="w-full h-full relative">
+      {/* Visual background — pointer-events-none so child table nodes receive all events */}
+      <div className="absolute inset-0 rounded-2xl border-2 pointer-events-none" style={{ background: palette.bg, borderColor: palette.border }}>
+        <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider select-none" style={{ color: palette.label }}>
+          {data.label}
+        </div>
       </div>
+      {/* Sequence Designer handles for group-to-group connections */}
+      {data.isDesignMode && (
+        <>
+          <Handle type="target" position={Position.Left} id="grp-seq-tgt" style={{ top: "50%", left: -8, width: 16, height: 16, background: "#3b82f6", border: "2.5px solid white", borderRadius: "50%", cursor: "crosshair", zIndex: 10 }} />
+          <Handle type="source" position={Position.Right} id="grp-seq-src" style={{ top: "50%", right: -8, width: 16, height: 16, background: "#3b82f6", border: "2.5px solid white", borderRadius: "50%", cursor: "crosshair", zIndex: 10 }} />
+        </>
+      )}
     </div>
   );
 }
@@ -74,20 +58,15 @@ function GroupBackgroundNode({ data }: { data: GroupNodeData }) {
 
 function DependencyEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style, data }: EdgeProps) {
   const [edgePath, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
-
   return (
     <>
       <BaseEdge path={edgePath} markerEnd={markerEnd as string} style={style as React.CSSProperties} />
       {data?.isDesignMode && (
         <EdgeLabelRenderer>
           <div className="nodrag nopan absolute" style={{ transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`, pointerEvents: "all" }}>
-            <button
-              onClick={() => (data.onDelete as (id: string) => void)?.(id)}
+            <button onClick={() => (data.onDelete as (id: string) => void)?.(id)}
               className="w-5 h-5 rounded-full bg-white dark:bg-zinc-900 border border-red-300 dark:border-red-700 text-red-500 text-[10px] flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors shadow-sm"
-              title="Remove dependency"
-            >
-              ✕
-            </button>
+              title="Remove dependency">✕</button>
           </div>
         </EdgeLabelRenderer>
       )}
@@ -100,7 +79,8 @@ function DependencyEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition
 interface FkInfo { fromCol: string; toTable: string; toCol: string }
 interface TableSchema { name: string; columns: ColumnInfo[]; fks: FkInfo[] }
 interface GroupDef { id: string; name: string; tables: string[] }
-interface DepEdge { id: string; source: string; target: string }
+interface DepEdge { id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string }
+interface LayoutData { positions?: Record<string, { x: number; y: number }>; display?: { groups: boolean; tables: boolean } }
 
 // ── schema extraction ─────────────────────────────────────────────────────────
 
@@ -112,10 +92,8 @@ function extractSchema(db: Database): TableSchema[] {
   const referencedCols = new Map<string, Set<string>>();
   for (const name of tableNames) {
     try {
-      const fkRows = db.exec(`PRAGMA foreign_key_list("${name}");`).at(0)?.values ?? [];
-      for (const row of fkRows) {
-        const toTable = row[2] as string;
-        const toCol = row[4] as string;
+      for (const row of db.exec(`PRAGMA foreign_key_list("${name}");`).at(0)?.values ?? []) {
+        const toTable = row[2] as string; const toCol = row[4] as string;
         if (!referencedCols.has(toTable)) referencedCols.set(toTable, new Set());
         referencedCols.get(toTable)!.add(toCol);
       }
@@ -139,107 +117,67 @@ function extractSchema(db: Database): TableSchema[] {
 }
 
 // ── grid layout ───────────────────────────────────────────────────────────────
-// Places tables in a grid (max COLS_PER_ROW per row) inside each group container.
-// Groups are placed side-by-side (left→right) with GRP_MARGIN between them.
-// Ungrouped tables are placed in a row at the bottom.
 
-function gridLayout(
-  schema: TableSchema[],
-  groups: GroupDef[],
-  isDesignMode: boolean,
-  rowCounts: Record<string, number>,
-): { nodes: Node[]; groupNodes: Node[] } {
+const GRP_MARGIN = 60;
+
+function gridLayout(schema: TableSchema[], groups: GroupDef[], isDesignMode: boolean, rowCounts: Record<string, number>): { nodes: Node[]; groupNodes: Node[] } {
   const tableH = collapsedHeight();
-  const tableIds = new Set(schema.map((t) => t.name));
-
+  const tableIds = new Set(schema.map(t => t.name));
   const allNodes: Node[] = [];
   const groupNodes: Node[] = [];
-
-  // Groups stack VERTICALLY — one per "line", no horizontal crowding
   let cursorY = 0;
 
   for (let gi = 0; gi < groups.length; gi++) {
     const group = groups[gi];
-    const members = group.tables.filter((t) => tableIds.has(t));
+    const members = group.tables.filter(t => tableIds.has(t));
     if (members.length === 0) continue;
 
     const palette = GROUP_PALETTES[gi % GROUP_PALETTES.length];
-    const numRows = Math.ceil(members.length / COLS_PER_ROW);
     const numCols = Math.min(members.length, COLS_PER_ROW);
     const innerW = numCols * NODE_WIDTH + (numCols - 1) * H_GAP;
-    // Use the tallest possible expanded height so nodes always expand downward (no upward clamping)
-    const maxMemberH = Math.max(...members.map(t => {
-      const tbl = schema.find(s => s.name === t);
-      return tbl ? expandedHeight(tbl.columns.length) : tableH;
-    }));
-    const innerH = numRows * maxMemberH + (numRows - 1) * V_GAP;
     const groupW = innerW + GRP_PAD_X * 2;
-    const groupH = innerH + GRP_PAD_TOP + GRP_PAD_BOTTOM;
-
+    // Initial height uses collapsed table size; resizes dynamically when children expand
+    const children = members.map(() => ({ collapsed: true, colCount: 0 }));
+    const groupH = groupHeightForChildren(children);
     const groupId = `__group__${group.id}`;
 
     groupNodes.push({
-      id: groupId,
-      type: "groupNode",
-      position: { x: 0, y: cursorY },   // ← vertical stacking
+      id: groupId, type: "groupNode",
+      position: { x: 0, y: cursorY },
       style: { width: groupW, height: groupH, zIndex: -1 },
-      draggable: true,
-      selectable: false,
-      data: { label: group.name, palette },
+      draggable: true, selectable: false,
+      data: { label: group.name, palette, isDesignMode },
     });
 
-    // Child table nodes (positions relative to parent group)
     members.forEach((tableName, idx) => {
       const col = idx % COLS_PER_ROW;
       const row = Math.floor(idx / COLS_PER_ROW);
-      const relX = GRP_PAD_X + col * (NODE_WIDTH + H_GAP);
-      const relY = GRP_PAD_TOP + row * (tableH + V_GAP);
-      const tbl = schema.find((t) => t.name === tableName)!;
+      const tbl = schema.find(t => t.name === tableName)!;
       allNodes.push({
-        id: tableName,
-        type: "tableNode",
-        parentId: groupId,
-        extent: "parent" as const,
-        position: { x: relX, y: relY },
+        id: tableName, type: "tableNode",
+        parentId: groupId, extent: "parent" as const,
+        position: { x: GRP_PAD_X + col * (NODE_WIDTH + H_GAP), y: GRP_PAD_TOP + row * (tableH + V_GAP) },
         zIndex: 1,
-        data: {
-          label: tableName,
-          columns: tbl.columns,
-          rowCount: rowCounts[tableName],
-          collapsed: true,
-          isDesignMode,
-        },
+        data: { label: tableName, columns: tbl.columns, rowCount: rowCounts[tableName], collapsed: true, isDesignMode, parentGroupId: groupId },
       });
     });
 
-    cursorY += groupH + GRP_MARGIN;   // ← advance downward
+    cursorY += groupH + GRP_MARGIN;
   }
 
-  // Ungrouped tables — row(s) below all groups
-  const assignedTables = new Set(groups.flatMap((g) => g.tables));
-  const ungrouped = schema.filter((t) => !assignedTables.has(t.name));
-
-  if (ungrouped.length > 0) {
-    const ungroupedY = cursorY;
-
-    ungrouped.forEach((tbl, idx) => {
-      const col = idx % COLS_PER_ROW;
-      const row = Math.floor(idx / COLS_PER_ROW);
-      allNodes.push({
-        id: tbl.name,
-        type: "tableNode",
-        position: { x: UNGROUPED_X_START + col * (NODE_WIDTH + H_GAP), y: ungroupedY + row * (tableH + V_GAP) },
-        zIndex: 1,
-        data: {
-          label: tbl.name,
-          columns: tbl.columns,
-          rowCount: rowCounts[tbl.name],
-          collapsed: true,
-          isDesignMode,
-        },
-      });
+  // Ungrouped tables
+  const assignedTables = new Set(groups.flatMap(g => g.tables));
+  const ungrouped = schema.filter(t => !assignedTables.has(t.name));
+  ungrouped.forEach((tbl, idx) => {
+    const col = idx % COLS_PER_ROW;
+    const row = Math.floor(idx / COLS_PER_ROW);
+    allNodes.push({
+      id: tbl.name, type: "tableNode",
+      position: { x: col * (NODE_WIDTH + H_GAP), y: cursorY + row * (tableH + V_GAP) },
+      zIndex: 1,
+      data: { label: tbl.name, columns: tbl.columns, rowCount: rowCounts[tbl.name], collapsed: true, isDesignMode },
     });
-  }
+  });
 
   return { nodes: allNodes, groupNodes };
 }
@@ -250,8 +188,7 @@ function buildFkEdges(schema: TableSchema[]): Edge[] {
   const edges: Edge[] = [];
   for (const table of schema) {
     for (const fk of table.fks) {
-      if (fk.toTable === table.name) continue;
-      if (!schema.find((t) => t.name === fk.toTable)) continue;
+      if (fk.toTable === table.name || !schema.find(t => t.name === fk.toTable)) continue;
       edges.push({
         id: `fk-${table.name}-${fk.fromCol}->${fk.toTable}-${fk.toCol}`,
         source: table.name, sourceHandle: `src-${fk.fromCol}`,
@@ -269,8 +206,8 @@ function buildFkEdges(schema: TableSchema[]): Edge[] {
 function depToEdge(dep: DepEdge, isDesignMode: boolean, onDelete?: (id: string) => void): Edge {
   return {
     id: dep.id,
-    source: dep.source, sourceHandle: "seq-src",
-    target: dep.target, targetHandle: "seq-tgt",
+    source: dep.source, sourceHandle: dep.sourceHandle ?? "seq-src",
+    target: dep.target, targetHandle: dep.targetHandle ?? "seq-tgt",
     type: "dependencyEdge", animated: true,
     style: { stroke: "#3b82f6", strokeWidth: 2, strokeDasharray: "8 4" },
     markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6", width: 14, height: 14 },
@@ -300,114 +237,48 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
   const [groups, setGroups] = useState<GroupDef[]>([]);
   const [isDesignMode, setIsDesignMode] = useState(false);
   const [storedDeps, setStoredDeps] = useState<DepEdge[]>([]);
+  const [showGroups, setShowGroups] = useState(true);
+  const [showTables, setShowTables] = useState(true);
+
   const savePendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveLayoutPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Refs so effects can read current values without being re-triggered
   const storedDepsRef = useRef<DepEdge[]>([]);
   const schemaRef = useRef<TableSchema[]>([]);
   const isDesignModeRef = useRef(false);
-  // Saved layout positions (fetched from server, applied once on load)
-  const savedLayoutRef = useRef<Record<string, { x: number; y: number }> | null>(null);
+  const savedLayoutRef = useRef<LayoutData | null>(null);
+  const showGroupsRef = useRef(true);
+  const showTablesRef = useRef(true);
 
   useEffect(() => { storedDepsRef.current = storedDeps; }, [storedDeps]);
   useEffect(() => { isDesignModeRef.current = isDesignMode; }, [isDesignMode]);
+  useEffect(() => { showGroupsRef.current = showGroups; }, [showGroups]);
+  useEffect(() => { showTablesRef.current = showTables; }, [showTables]);
+
+  // ── persistence helpers ──────────────────────────────────────────────────────
+
+  function putLayout(data: LayoutData) {
+    fetch(`/api/databases/${encodeURIComponent(dbName)}/layout`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }).catch(() => {});
+  }
 
   function saveLayout(positions: Record<string, { x: number; y: number }>) {
+    const payload: LayoutData = {
+      positions,
+      display: { groups: showGroupsRef.current, tables: showTablesRef.current },
+    };
+    savedLayoutRef.current = payload;
     if (saveLayoutPendingRef.current) clearTimeout(saveLayoutPendingRef.current);
-    saveLayoutPendingRef.current = setTimeout(() => {
-      fetch(`/api/databases/${encodeURIComponent(dbName)}/layout`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ positions }),
-      }).catch(() => {});
-    }, 800);
+    saveLayoutPendingRef.current = setTimeout(() => putLayout(payload), 800);
   }
 
-  // On drag end: save all node positions to server
-  const onNodeDragStop = useCallback(
-    (_: React.MouseEvent, _node: Node, allNodes: Node[]) => {
-      const positions: Record<string, { x: number; y: number }> = {};
-      for (const n of allNodes) {
-        if (n.type === "tableNode" || n.type === "groupNode") {
-          positions[n.id] = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
-        }
-      }
-      savedLayoutRef.current = positions; // update ref so future rebuilds use saved positions
-      saveLayout(positions);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dbName]
-  );
-
-  // Fetch groups, deps, and saved layout in parallel
-  useEffect(() => {
-    if (!dbName) return;
-    savedLayoutRef.current = null; // reset on database change
-    const enc = encodeURIComponent(dbName);
-    Promise.all([
-      fetch(`/api/databases/${enc}/groups`).then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(`/api/databases/${enc}/deps`).then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(`/api/databases/${enc}/layout`).then(r => r.ok ? r.json() : {}).catch(() => {}),
-    ]).then(([g, d, l]) => {
-      setGroups(Array.isArray(g) ? g : []);
-      setStoredDeps(Array.isArray(d) ? d : []);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      savedLayoutRef.current = (l && typeof (l as any).positions === "object") ? (l as any).positions : null;
-    });
-  }, [dbName]);
-
-  // Apply saved positions on top of auto-computed layout
-  function applyPositions(nodes: Node[]): Node[] {
-    const saved = savedLayoutRef.current;
-    if (!saved) return nodes;
-    return nodes.map(n => {
-      const pos = saved[n.id];
-      return pos ? { ...n, position: pos } : n;
-    });
+  function saveDisplayPrefs(grps: boolean, tbls: boolean) {
+    const current = savedLayoutRef.current ?? {};
+    const payload: LayoutData = { ...current, display: { groups: grps, tables: tbls } };
+    savedLayoutRef.current = payload;
+    putLayout(payload);
   }
-
-  // Rebuild layout — does NOT depend on storedDeps (prevents layout reset on dep changes).
-  // Uses storedDepsRef so it still includes current deps on the initial build.
-  useEffect(() => {
-    if (!db) return;
-    const schema = extractSchema(db);
-    schemaRef.current = schema;
-    const fkEdges = buildFkEdges(schema);
-    const depEdges = storedDepsRef.current
-      .filter(d => schema.find(t => t.name === d.source) && schema.find(t => t.name === d.target))
-      .map(d => depToEdge(d, isDesignModeRef.current, handleDepDelete));
-
-    // Build auto layout, then overlay any saved positions
-    const { nodes: tableNodes, groupNodes } = gridLayout(schema, groups, isDesignModeRef.current, rowCounts);
-    setNodes(applyPositions([...groupNodes, ...tableNodes]));
-    setEdges([...fkEdges, ...depEdges]);
-    setTableCount(schema.length);
-    setFkCount(fkEdges.length);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, rowCounts, groups]); // storedDeps intentionally omitted
-
-  // Sync dep edges only — never touches nodes, preserves layout
-  useEffect(() => {
-    if (schemaRef.current.length === 0) return;
-    const depEdges = storedDeps
-      .filter(d => schemaRef.current.find(t => t.name === d.source) && schemaRef.current.find(t => t.name === d.target))
-      .map(d => depToEdge(d, isDesignModeRef.current, handleDepDelete));
-    setEdges(prev => {
-      const fkEdges = prev.filter(e => e.type !== "dependencyEdge");
-      // Idempotency: skip if dep IDs are identical
-      const prevIds = prev.filter(e => e.type === "dependencyEdge").map(e => e.id).sort().join(",");
-      const newIds = depEdges.map(e => e.id).sort().join(",");
-      if (prevIds === newIds) return prev;
-      return [...fkEdges, ...depEdges];
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storedDeps]);
-
-  // Sync isDesignMode into existing node/edge data — never rebuilds layout
-  useEffect(() => {
-    setNodes(nds => nds.map(n => n.type === "tableNode" ? { ...n, data: { ...n.data, isDesignMode } } : n));
-    setEdges(es => es.map(e => e.type === "dependencyEdge" ? { ...e, data: { ...e.data, isDesignMode, onDelete: handleDepDelete } } : e));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDesignMode]);
 
   function saveDeps(deps: DepEdge[]) {
     if (savePendingRef.current) clearTimeout(savePendingRef.current);
@@ -419,38 +290,188 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
     }, 600);
   }
 
-  // Stable callback for dep edge deletion (from ✕ button in DependencyEdge)
-  const handleDepDelete = useCallback((id: string) => {
-    setEdges(es => es.filter(e => e.id !== id));
-    setStoredDeps(prev => {
-      const updated = prev.filter(d => d.id !== id);
-      saveDeps(updated);
-      return updated;
+  // ── load everything on dbName change ─────────────────────────────────────────
+
+  useEffect(() => {
+    if (!dbName) return;
+    savedLayoutRef.current = null;
+    const enc = encodeURIComponent(dbName);
+    Promise.all([
+      fetch(`/api/databases/${enc}/groups`).then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`/api/databases/${enc}/deps`).then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`/api/databases/${enc}/layout`).then(r => r.ok ? r.json() : {}).catch(() => ({})),
+    ]).then(([g, d, l]) => {
+      const layout = l as LayoutData;
+      setGroups(Array.isArray(g) ? g : []);
+      setStoredDeps(Array.isArray(d) ? d : []);
+      savedLayoutRef.current = layout;
+      // Restore display prefs
+      if (layout?.display) {
+        setShowGroups(layout.display.groups ?? true);
+        setShowTables(layout.display.tables ?? true);
+        showGroupsRef.current = layout.display.groups ?? true;
+        showTablesRef.current = layout.display.tables ?? true;
+      }
+    });
+  }, [dbName]);
+
+  // ── apply saved positions helper ──────────────────────────────────────────────
+
+  function applyPositions(nodes: Node[]): Node[] {
+    const saved = savedLayoutRef.current?.positions;
+    if (!saved) return nodes;
+    return nodes.map(n => { const p = saved[n.id]; return p ? { ...n, position: p } : n; });
+  }
+
+  // ── rebuild layout (no storedDeps dependency — prevents rerender on dep add) ──
+
+  useEffect(() => {
+    if (!db) return;
+    const schema = extractSchema(db);
+    schemaRef.current = schema;
+    const fkEdges = buildFkEdges(schema);
+    const depEdges = storedDepsRef.current
+      .filter(d => schema.find(t => t.name === d.source) || groups.find(g => `__group__${g.id}` === d.source))
+      .filter(d => schema.find(t => t.name === d.target) || groups.find(g => `__group__${g.id}` === d.target))
+      .map(d => depToEdge(d, isDesignModeRef.current, handleDepDelete));
+
+    const { nodes: tableNodes, groupNodes } = gridLayout(schema, groups, isDesignModeRef.current, rowCounts);
+    setNodes(applyPositions([...groupNodes, ...tableNodes]));
+    setEdges([...fkEdges, ...depEdges]);
+    setTableCount(schema.length);
+    setFkCount(fkEdges.length);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, rowCounts, groups]);
+
+  // ── dep-only sync (no node rebuild) ──────────────────────────────────────────
+
+  useEffect(() => {
+    if (schemaRef.current.length === 0) return;
+    const depEdges = storedDeps
+      .filter(d => {
+        const schema = schemaRef.current;
+        const srcOk = schema.find(t => t.name === d.source) || groups.find(g => `__group__${g.id}` === d.source);
+        const tgtOk = schema.find(t => t.name === d.target) || groups.find(g => `__group__${g.id}` === d.target);
+        return srcOk && tgtOk;
+      })
+      .map(d => depToEdge(d, isDesignModeRef.current, handleDepDelete));
+    setEdges(prev => {
+      const fk = prev.filter(e => e.type !== "dependencyEdge");
+      const prevIds = prev.filter(e => e.type === "dependencyEdge").map(e => e.id).sort().join(",");
+      const newIds = depEdges.map(e => e.id).sort().join(",");
+      if (prevIds === newIds) return prev;
+      return [...fk, ...depEdges];
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storedDeps]);
+
+  // ── isDesignMode sync ─────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    setNodes(nds => nds.map(n =>
+      n.type === "tableNode" || n.type === "groupNode"
+        ? { ...n, data: { ...n.data, isDesignMode } }
+        : n
+    ));
+    setEdges(es => es.map(e => e.type === "dependencyEdge" ? { ...e, data: { ...e.data, isDesignMode, onDelete: handleDepDelete } } : e));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDesignMode]);
+
+  // ── dep deletion callback ────────────────────────────────────────────────────
+
+  const handleDepDelete = useCallback((id: string) => {
+    setEdges(es => es.filter(e => e.id !== id));
+    setStoredDeps(prev => { const u = prev.filter(d => d.id !== id); saveDeps(u); return u; });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbName]);
+
+  // ── connect callback (tables AND groups) ─────────────────────────────────────
 
   const handleConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return;
     const id = `dep-${connection.source}->${connection.target}`;
+    const newDep: DepEdge = {
+      id,
+      source: connection.source,
+      target: connection.target,
+      sourceHandle: connection.sourceHandle ?? undefined,
+      targetHandle: connection.targetHandle ?? undefined,
+    };
     setEdges(es => {
       if (es.some(e => e.id === id)) return es;
-      const newEdge = depToEdge({ id, source: connection.source!, target: connection.target! }, true, handleDepDelete);
-      return [...es, newEdge];
+      return [...es, depToEdge(newDep, true, handleDepDelete)];
     });
     setStoredDeps(prev => {
       if (prev.some(d => d.id === id)) return prev;
-      const updated = [...prev, { id, source: connection.source!, target: connection.target! }];
+      const updated = [...prev, newDep];
       saveDeps(updated);
       return updated;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dbName]);
+  }, [dbName, handleDepDelete]);
 
+  // ── position saving ───────────────────────────────────────────────────────────
+
+  const onNodeDragStop = useCallback((_: React.MouseEvent, _node: Node, allNodes: Node[]) => {
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const n of allNodes) {
+      if (n.type === "tableNode" || n.type === "groupNode") {
+        positions[n.id] = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
+      }
+    }
+    saveLayout(positions);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbName, showGroups, showTables]);
+
+  // ── display toggles ───────────────────────────────────────────────────────────
+
+  function toggleShowGroups() {
+    const next = !showGroups;
+    setShowGroups(next);
+    showGroupsRef.current = next;
+    saveDisplayPrefs(next, showTablesRef.current);
+  }
+
+  function toggleShowTables() {
+    const next = !showTables;
+    setShowTables(next);
+    showTablesRef.current = next;
+    saveDisplayPrefs(showGroupsRef.current, next);
+  }
+
+  // ── computed display nodes/edges (filter without touching real state) ─────────
+
+  const displayNodes = useMemo(() => {
+    if (showGroups && showTables) return nodes;
+
+    if (!showGroups) {
+      // Flatten table positions to absolute, remove group nodes
+      const groupPositions = new Map(
+        nodes.filter(n => n.type === "groupNode").map(n => [n.id, n.position as { x: number; y: number }])
+      );
+      return nodes
+        .filter(n => n.type !== "groupNode" && (showTables || n.type !== "tableNode"))
+        .map(n => {
+          if (n.type === "tableNode" && n.parentId) {
+            const gPos = groupPositions.get(n.parentId);
+            if (gPos) return { ...n, parentId: undefined, extent: undefined, position: { x: gPos.x + n.position.x, y: gPos.y + n.position.y } };
+            return { ...n, parentId: undefined, extent: undefined };
+          }
+          return n;
+        });
+    }
+
+    // showGroups=true, showTables=false
+    return nodes.filter(n => n.type !== "tableNode");
+  }, [nodes, showGroups, showTables]);
+
+  const displayEdges = useMemo(() => {
+    const displayIds = new Set(displayNodes.map(n => n.id));
+    return edges.filter(e => displayIds.has(e.source) && displayIds.has(e.target));
+  }, [edges, displayNodes]);
 
   function toggleDesignMode() {
-    const deps = storedDepsRef.current;
-    saveDeps(deps);
+    saveDeps(storedDepsRef.current);
     setIsDesignMode(m => !m);
   }
 
@@ -460,29 +481,27 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
   const depCount = storedDeps.length;
   const groupCount = groups.filter(g => g.tables.some(t => nodes.find(n => n.id === t))).length;
 
-  if (!db) return (
-    <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600 text-sm">Loading database…</div>
-  );
+  if (!db) return <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600 text-sm">Loading database…</div>;
+
+  // ── render ────────────────────────────────────────────────────────────────────
 
   return (
     <div className="h-full w-full relative">
       <ReactFlow
-        nodes={nodes} edges={edges}
+        nodes={displayNodes} edges={displayEdges}
         onNodesChange={onNodesChange}
-        onNodeDragStop={onNodeDragStop}
         onEdgesChange={onEdgesChange}
         onConnect={isDesignMode ? handleConnect : undefined}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
+        onNodeDragStop={onNodeDragStop}
+        nodeTypes={nodeTypes} edgeTypes={edgeTypes}
         fitView fitViewOptions={{ padding: 0.12 }}
         minZoom={0.1} maxZoom={2}
         proOptions={proOptions}
         onInit={onInit as never}
         colorMode={isDark ? "dark" : "light"}
         edgesFocusable={isDesignMode}
-        nodesDraggable
-        snapToGrid
-        snapGrid={[10, 10]}
+        nodesDraggable={showGroups} // disable drag in flat view to avoid position mismatch
+        snapToGrid snapGrid={[10, 10]}
         deleteKeyCode={isDesignMode ? "Delete" : null}
         connectionMode={"loose" as never}
       >
@@ -500,29 +519,51 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
           </div>
         </Panel>
 
-        {/* Mode toggle — top-right */}
+        {/* Controls — top-right */}
         <Panel position="top-right">
           <div className="flex flex-col items-end gap-2">
+            {/* View / Sequence Designer toggle */}
             <div className="flex rounded-md border border-zinc-200 dark:border-zinc-700 overflow-hidden text-xs bg-white dark:bg-zinc-900 shadow-sm">
-              <button
-                onClick={() => isDesignMode && toggleDesignMode()}
-                className={`px-3 py-1.5 transition-colors ${!isDesignMode ? "bg-zinc-100 dark:bg-zinc-800 font-semibold text-zinc-800 dark:text-zinc-100" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"}`}
-              >
+              <button onClick={() => isDesignMode && toggleDesignMode()}
+                className={`px-3 py-1.5 transition-colors ${!isDesignMode ? "bg-zinc-100 dark:bg-zinc-800 font-semibold text-zinc-800 dark:text-zinc-100" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"}`}>
                 View
               </button>
-              <button
-                onClick={() => !isDesignMode && toggleDesignMode()}
-                className={`px-3 py-1.5 border-l border-zinc-200 dark:border-zinc-700 transition-colors flex items-center gap-1.5 ${isDesignMode ? "bg-blue-50 dark:bg-blue-950/40 font-semibold text-blue-600 dark:text-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"}`}
-              >
+              <button onClick={() => !isDesignMode && toggleDesignMode()}
+                className={`px-3 py-1.5 border-l border-zinc-200 dark:border-zinc-700 transition-colors flex items-center gap-1.5 ${isDesignMode ? "bg-blue-50 dark:bg-blue-950/40 font-semibold text-blue-600 dark:text-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"}`}>
                 <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
                 </svg>
                 Sequence Designer
               </button>
             </div>
+
+            {/* Show/hide toggles */}
+            <div className="flex gap-1.5">
+              <button
+                onClick={toggleShowGroups}
+                title={showGroups ? "Hide group containers" : "Show group containers"}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md border text-xs transition-colors ${showGroups ? "border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800" : "border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 line-through"}`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  {showGroups ? <><path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><path d="M2 12h20"/></> : <><path d="m2 2 20 20"/><path d="M8.5 5H18a2 2 0 0 1 2 2v9.5"/><path d="M5 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2"/></>}
+                </svg>
+                Groups
+              </button>
+              <button
+                onClick={toggleShowTables}
+                title={showTables ? "Hide tables" : "Show tables"}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md border text-xs transition-colors ${showTables ? "border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800" : "border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 line-through"}`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  {showTables ? <><path d="M3 3h18v18H3z"/><path d="M3 9h18M3 15h18M9 3v18"/></> : <><path d="m2 2 20 20"/><path d="M9 3H21v12"/><path d="M3 3v18h12"/></>}
+                </svg>
+                Tables
+              </button>
+            </div>
+
             {isDesignMode && (
               <div className="text-[11px] bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-md px-2.5 py-1.5 max-w-[220px] text-center leading-relaxed shadow-sm">
-                Drag from a <span className="font-semibold">●</span> handle to another table to add a dependency.
+                Drag from a <span className="font-semibold">●</span> handle to another table or group to add a dependency.
                 Click <span className="font-semibold">✕</span> on an arrow to remove it.
               </div>
             )}
