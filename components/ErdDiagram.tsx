@@ -346,8 +346,14 @@ export function ErdDiagram({ db, dbName, rowCounts, visible }: Props) {
   useEffect(() => { hiddenTablesRef.current = hiddenTables; }, [hiddenTables]);
   useEffect(() => { dbNameRef.current = dbName; }, [dbName]);
 
-  // Reset fit state when the database changes so the new db always gets a first fit
-  useEffect(() => { hasFittedRef.current = false; }, [dbName]);
+  // Reset all per-db state when the database changes
+  useEffect(() => {
+    hasFittedRef.current = false;
+    savedLayoutRef.current = null;
+    setSavedLayout(null);
+    setGroups([]);
+    setStoredDeps([]);
+  }, [dbName]);
 
   // Call fitView the first time the schema tab becomes visible AND nodes are ready.
   // We skip this while hidden (display:none) because fitView with a 0×0 container
@@ -400,31 +406,46 @@ export function ErdDiagram({ db, dbName, rowCounts, visible }: Props) {
     }, 600);
   }
 
-  // ── flush on unmount to avoid losing the last drag ───────────────────────────
+  // ── flush on unmount (page unload) ───────────────────────────────────────────
 
   useEffect(() => {
     return () => {
       if (saveLayoutPendingRef.current) clearTimeout(saveLayoutPendingRef.current);
-      // keepalive ensures the PUT survives a page reload / navigation-away
       if (savedLayoutRef.current) putLayout(savedLayoutRef.current, true);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbName]);
 
-  // ── load everything on dbName change ─────────────────────────────────────────
+  // ── save immediately when leaving Schema ─────────────────────────────────────
+  // This ensures the server has the very latest positions before the next load.
+  useEffect(() => {
+    if (visible) return;                           // entering Schema — nothing to save yet
+    if (!savedLayoutRef.current) return;           // nothing saved yet
+    if (saveLayoutPendingRef.current) {
+      clearTimeout(saveLayoutPendingRef.current);  // cancel the debounce — we're saving now
+      saveLayoutPendingRef.current = null;
+    }
+    putLayout(savedLayoutRef.current, false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  // ── load groups / deps / layout every time Schema is opened ──────────────────
+  // Fires on each Schema navigation so users always see their latest saved layout,
+  // including after a page reload or from a different machine.
 
   useEffect(() => {
-    if (!dbName) return;
-    savedLayoutRef.current = null;
+    if (!visible || !dbName) return;
+    let cancelled = false;
     const enc = encodeURIComponent(dbName);
+
     Promise.all([
       fetch(`/api/databases/${enc}/groups`).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch(`/api/databases/${enc}/deps`).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch(`/api/databases/${enc}/layout`).then(r => r.ok ? r.json() : {}).catch(() => ({})),
     ]).then(([g, d, l]) => {
+      if (cancelled) return;
       const serverLayout = l as LayoutData;
 
-      // Restore non-position settings from server (always authoritative for these)
       if (serverLayout?.display) {
         setShowGroups(serverLayout.display.groups ?? true);
         showGroupsRef.current = serverLayout.display.groups ?? true;
@@ -448,12 +469,13 @@ export function ErdDiagram({ db, dbName, rowCounts, visible }: Props) {
 
       setGroups(Array.isArray(g) ? g : []);
       setStoredDeps(Array.isArray(d) ? d : []);
-
       savedLayoutRef.current = serverLayout;
       setSavedLayout(serverLayout);
     });
+
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dbName]);
+  }, [visible, dbName]);
 
   // ── hide/unhide table ────────────────────────────────────────────────────────
 
