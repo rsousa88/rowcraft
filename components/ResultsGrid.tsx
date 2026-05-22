@@ -383,14 +383,14 @@ export function ResultsGrid({
                   key={rowIdx}
                   className={[
                     "group border-b border-zinc-100 dark:border-zinc-800/50",
-                    isEditing ? "bg-blue-50 dark:bg-blue-950/20" : isSelected ? "bg-emerald-50/50 dark:bg-emerald-950/20" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/30",
+                    isEditing ? "bg-blue-50 dark:bg-blue-950" : isSelected ? "bg-emerald-50 dark:bg-emerald-950" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/30",
                   ].join(" ")}
                 >
                   {/* Checkbox cell */}
                   <td
                     className={[
                       "sticky z-10 px-1 py-0.5 w-5",
-                      isEditing ? "bg-blue-50 dark:bg-blue-950/20" : isSelected ? "bg-emerald-50/50 dark:bg-emerald-950/20" : "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800",
+                      isEditing ? "bg-blue-50 dark:bg-blue-950" : isSelected ? "bg-emerald-50 dark:bg-emerald-950" : "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800",
                     ].join(" ")}
                     style={{ left: frozenLeftChk }}
                   >
@@ -406,7 +406,7 @@ export function ResultsGrid({
                     <td
                       className={[
                         "sticky z-10 px-2 py-1 w-16 whitespace-nowrap",
-                        isEditing ? "bg-blue-50 dark:bg-blue-950/20" : isSelected ? "bg-emerald-50/50 dark:bg-emerald-950/20" : "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800",
+                        isEditing ? "bg-blue-50 dark:bg-blue-950" : isSelected ? "bg-emerald-50 dark:bg-emerald-950" : "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800",
                       ].join(" ")}
                       style={{ left: frozenLeftAction }}
                     >
@@ -433,8 +433,8 @@ export function ResultsGrid({
                           "px-1 py-0.5",
                           isFrozen ? "sticky z-10 shadow-[2px_0_0_0_rgba(0,0,0,0.06)]" : "",
                           isFrozen && !isEditing && !isSelected ? "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800" : "",
-                          isFrozen && isEditing ? "bg-blue-50 dark:bg-blue-950/20" : "",
-                          isFrozen && isSelected && !isEditing ? "bg-emerald-50/50 dark:bg-emerald-950/20" : "",
+                          isFrozen && isEditing ? "bg-blue-50 dark:bg-blue-950" : "",
+                          isFrozen && isSelected && !isEditing ? "bg-emerald-50 dark:bg-emerald-950" : "",
                         ].join(" ")}
                         style={isFrozen ? { left: frozenLeftData(ci) } : undefined}
                       >

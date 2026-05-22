@@ -293,9 +293,16 @@ const nodeTypes: Record<string, any> = { tableNode: ErdTableNode, groupNode: Gro
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const edgeTypes: Record<string, any> = { dependencyEdge: DependencyEdge };
 
-interface Props { db: Database | null; dbName: string; rowCounts: Record<string, number> }
+interface Props {
+  db: Database | null;
+  dbName: string;
+  rowCounts: Record<string, number>;
+  // Layout from parent cache — eliminates GET/PUT race on view switch
+  initialLayout?: LayoutData | null;
+  onLayoutChange?: (layout: LayoutData) => void;
+}
 
-export function ErdDiagram({ db, dbName, rowCounts }: Props) {
+export function ErdDiagram({ db, dbName, rowCounts, initialLayout, onLayoutChange }: Props) {
   const { theme } = useTheme();
   const isDark = theme === "dark" || (theme === "auto" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
@@ -314,7 +321,9 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
 
   // savedLayout drives the layout effect — using state (not ref) ensures the effect
   // always re-runs with the correct positions after the async fetch completes.
-  const [savedLayout, setSavedLayout] = useState<LayoutData | null>(null);
+  // Initialised from the parent cache so remounting uses the last known positions
+  // immediately, eliminating the GET/PUT race on view switches.
+  const [savedLayout, setSavedLayout] = useState<LayoutData | null>(initialLayout ?? null);
 
   // Refs for use inside callbacks that can't close over changing state
   const savedLayoutRef = useRef<LayoutData | null>(null);
@@ -355,6 +364,7 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
       hiddenTables: [...hiddenTablesRef.current],
     };
     savedLayoutRef.current = payload;
+    onLayoutChange?.(payload);   // keep parent cache in sync on every drag
     if (saveLayoutPendingRef.current) clearTimeout(saveLayoutPendingRef.current);
     saveLayoutPendingRef.current = setTimeout(() => putLayout(payload), 800);
   }
@@ -392,35 +402,32 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
 
   useEffect(() => {
     if (!dbName) return;
-    // Reset layout state before fetching new db's layout
-    setSavedLayout(null);
-    savedLayoutRef.current = null;
+    // Seed ref from whatever was in the parent cache so saveLayout/saveDisplayPrefs
+    // can merge against it immediately (before the GET returns).
+    savedLayoutRef.current = initialLayout ?? null;
     const enc = encodeURIComponent(dbName);
     Promise.all([
       fetch(`/api/databases/${enc}/groups`).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch(`/api/databases/${enc}/deps`).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch(`/api/databases/${enc}/layout`).then(r => r.ok ? r.json() : {}).catch(() => ({})),
     ]).then(([g, d, l]) => {
-      const layout = l as LayoutData;
-      savedLayoutRef.current = layout;
+      const serverLayout = l as LayoutData;
 
-      // Restore display prefs
-      if (layout?.display) {
-        setShowGroups(layout.display.groups ?? true);
-        showGroupsRef.current = layout.display.groups ?? true;
+      // Restore non-position settings from server (always authoritative for these)
+      if (serverLayout?.display) {
+        setShowGroups(serverLayout.display.groups ?? true);
+        showGroupsRef.current = serverLayout.display.groups ?? true;
       }
-      // Restore edge style
-      if (layout?.edgeRounded !== undefined) {
-        setEdgeRounded(layout.edgeRounded);
-        edgeRoundedRef.current = layout.edgeRounded;
+      if (serverLayout?.edgeRounded !== undefined) {
+        setEdgeRounded(serverLayout.edgeRounded);
+        edgeRoundedRef.current = serverLayout.edgeRounded;
       }
-      if (layout?.edgeSpread !== undefined) {
-        setEdgeSpread(layout.edgeSpread);
-        edgeSpreadRef.current = layout.edgeSpread;
+      if (serverLayout?.edgeSpread !== undefined) {
+        setEdgeSpread(serverLayout.edgeSpread);
+        edgeSpreadRef.current = serverLayout.edgeSpread;
       }
-      // Restore hidden tables
-      if (layout?.hiddenTables) {
-        const ht = new Set<string>(layout.hiddenTables);
+      if (serverLayout?.hiddenTables) {
+        const ht = new Set<string>(serverLayout.hiddenTables);
         setHiddenTables(ht);
         hiddenTablesRef.current = ht;
       } else {
@@ -431,8 +438,19 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
       setGroups(Array.isArray(g) ? g : []);
       setStoredDeps(Array.isArray(d) ? d : []);
 
-      // setSavedLayout triggers the layout effect with correct positions
-      setSavedLayout(layout);
+      // For POSITIONS: if we already have cached positions (initialLayout), trust the
+      // cache over the server because the cache reflects the most-recent drag and
+      // avoids the GET/PUT race where the GET resolves before the PUT persists.
+      // The layout effect will re-run when groups changes and will use the cached positions.
+      // On first visit (no cache), load positions from the server response.
+      if (!initialLayout?.positions) {
+        savedLayoutRef.current = serverLayout;
+        onLayoutChange?.(serverLayout);
+        setSavedLayout(serverLayout);
+      } else {
+        // Keep the cached positions, just update the ref with server settings merged in
+        savedLayoutRef.current = { ...serverLayout, positions: initialLayout.positions };
+      }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbName]);

@@ -1,7 +1,9 @@
 "use client";
 
+import { useRef, useEffect } from "react";
 import CodeMirror, { EditorView, keymap } from "@uiw/react-codemirror";
 import { sql, SQLite, SQLNamespace } from "@codemirror/lang-sql";
+import { Compartment } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { githubLight } from "@uiw/codemirror-theme-github";
 import { autocompletion, startCompletion } from "@codemirror/autocomplete";
@@ -16,45 +18,36 @@ interface Props {
   theme: "light" | "dark";
 }
 
-export default function SqlEditor({ value, onChange, onSelectionChange, tables, columns, theme }: Props) {
+function buildSqlExt(tables: string[], columns: Record<string, string[]>) {
   const schema: SQLNamespace = {};
   for (const t of tables) {
     schema[t] = columns[t] ?? [];
   }
+  return sql({ dialect: SQLite, schema, upperCaseKeywords: true });
+}
+
+export default function SqlEditor({ value, onChange, onSelectionChange, tables, columns, theme }: Props) {
+  const viewRef = useRef<EditorView | null>(null);
+  // Compartment lets us swap the SQL extension (with its schema) without rebuilding the editor
+  const sqlCompartment = useRef(new Compartment());
+
+  // Push updated schema into the live editor whenever tables/columns change
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: sqlCompartment.current.reconfigure(buildSqlExt(tables, columns)),
+    });
+  }, [tables, columns]);
 
   const extensions = [
-    sql({
-      dialect: SQLite,
-      schema,
-      upperCaseKeywords: true,
-    }),
+    sqlCompartment.current.of(buildSqlExt(tables, columns)),
     EditorView.lineWrapping,
     autocompletion({ activateOnTyping: true }),
     keymap.of([
-      // Ctrl/Cmd+Space — trigger autocomplete
-      {
-        key: "Ctrl-Space",
-        mac: "Cmd-Space",
-        run: startCompletion,
-      },
-      // Ctrl/Cmd+K+C — comment selection (VS Code style)
-      {
-        key: "Ctrl-k Ctrl-c",
-        mac: "Cmd-k Cmd-c",
-        run: (view) => {
-          toggleComment(view);
-          return true;
-        },
-      },
-      // Ctrl/Cmd+K+U — uncomment selection
-      {
-        key: "Ctrl-k Ctrl-u",
-        mac: "Cmd-k Cmd-u",
-        run: (view) => {
-          toggleComment(view);
-          return true;
-        },
-      },
+      { key: "Ctrl-Space", mac: "Cmd-Space", run: startCompletion },
+      { key: "Ctrl-k Ctrl-c", mac: "Cmd-k Cmd-c", run: (v) => { toggleComment(v); return true; } },
+      { key: "Ctrl-k Ctrl-u", mac: "Cmd-k Cmd-u", run: (v) => { toggleComment(v); return true; } },
     ]),
     EditorView.updateListener.of((update) => {
       const sel = update.state.sliceDoc(
@@ -73,11 +66,12 @@ export default function SqlEditor({ value, onChange, onSelectionChange, tables, 
       theme={theme === "dark" ? oneDark : githubLight}
       extensions={extensions}
       onChange={onChange}
+      onCreateEditor={(view) => { viewRef.current = view; }}
       basicSetup={{
         lineNumbers: true,
         highlightActiveLine: true,
         bracketMatching: true,
-        autocompletion: false, // we manage it above
+        autocompletion: false,
         defaultKeymap: true,
       }}
     />

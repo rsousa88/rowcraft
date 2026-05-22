@@ -48,6 +48,10 @@ export function DbViewer({ dbName }: { dbName: string }) {
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
   const sidebarDragRef = useRef<{ startX: number; startW: number } | null>(null);
   const selectionRef = useRef<string>("");
+  // Persist the last known ERD layout across Schema↔Query view switches so
+  // ErdDiagram can initialize from it immediately (avoids GET/PUT race condition).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const erdLayoutCacheRef = useRef<any>(null);
 
   // ── column selection persistence ──────────────────────────────────────────
   function colsKey(table: string) { return `rc-cols-${dbName}-${table}`; }
@@ -634,7 +638,13 @@ export function DbViewer({ dbName }: { dbName: string }) {
         <div className="flex flex-1 flex-col overflow-hidden">
           {view === "schema" ? (
             /* ── Schema / ER diagram view ── */
-            <ErdDiagram db={db} dbName={dbName} rowCounts={rowCounts} />
+            <ErdDiagram
+              db={db}
+              dbName={dbName}
+              rowCounts={rowCounts}
+              initialLayout={erdLayoutCacheRef.current}
+              onLayoutChange={(l) => { erdLayoutCacheRef.current = l; }}
+            />
           ) : (
             /* ── Query view ── */
             <>
