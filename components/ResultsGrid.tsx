@@ -173,11 +173,17 @@ export function ResultsGrid({
     setCopyMenuOpen(false);
   }
 
+  // Combined action column width: checkbox-only (non-editable) vs checkbox+edit/delete (editable)
+  // Use explicit pixel values so the sticky `left` offsets for data columns are exact.
+  const ACTION_W = editableMode ? 80 : 32;
+  // Minimum data-column width must match the `left` step used below.
+  const DATA_COL_W = 120;
+  const frozenDataLeft = (idx: number) => ACTION_W + idx * DATA_COL_W;
+
   // Column header cell
   const Th = useCallback(({ col, idx }: { col: string; idx: number }) => {
     const sortEntry = sort.find((s) => s.col === idx);
     const isFrozen = idx < freezeCols;
-    const leftPx = editableMode ? 64 + 20 + idx * 120 : 20 + idx * 120; // +20 for checkbox col
     return (
       <th
         onClick={(e) => handleSortClick(idx, e.shiftKey)}
@@ -187,7 +193,7 @@ export function ResultsGrid({
           "hover:text-zinc-700 dark:hover:text-zinc-200",
           isFrozen ? "sticky z-20 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_0_0_rgba(0,0,0,0.06)]" : "",
         ].join(" ")}
-        style={isFrozen ? { left: leftPx } : undefined}
+        style={isFrozen ? { left: frozenDataLeft(idx), minWidth: DATA_COL_W } : undefined}
         title={`${col} — click to sort, Shift+click to multi-sort`}
       >
         <span className="flex items-center gap-1">
@@ -211,10 +217,6 @@ export function ResultsGrid({
   const allPageSelected = pageLocalIndices.length > 0 && pageLocalIndices.every(i => selectedRows.has(i));
   const somePageSelected = pageLocalIndices.some(i => selectedRows.has(i));
   const selectedCount = selectedRows.size;
-
-  const frozenLeftChk = 0;
-  const frozenLeftAction = 20; // after checkbox col
-  const frozenLeftData = (idx: number) => editableMode ? 20 + 64 + idx * 120 : 20 + idx * 120;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -322,10 +324,10 @@ export function ResultsGrid({
         <table className="text-sm border-collapse" style={{ minWidth: "100%" }}>
           <thead>
             <tr className="bg-zinc-50 dark:bg-zinc-900 sticky top-0 z-10">
-              {/* Checkbox col */}
+              {/* Combined action column: checkbox + edit/delete in editable mode. Always at left:0. */}
               <th
-                className="w-5 px-1 border-b border-zinc-200 dark:border-zinc-800 sticky z-20 bg-zinc-50 dark:bg-zinc-900"
-                style={{ left: frozenLeftChk }}
+                className="sticky z-20 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-2"
+                style={{ left: 0, width: ACTION_W, minWidth: ACTION_W }}
               >
                 <input
                   type="checkbox"
@@ -336,23 +338,13 @@ export function ResultsGrid({
                   title="Select / deselect all rows on this page"
                 />
               </th>
-              {editableMode && (
-                <th
-                  className={[
-                    "w-16 px-2 border-b border-zinc-200 dark:border-zinc-800",
-                    "sticky z-20 bg-zinc-50 dark:bg-zinc-900",
-                  ].join(" ")}
-                  style={{ left: frozenLeftAction }}
-                />
-              )}
               {result.columns.map((col, idx) => <Th key={col + idx} col={col} idx={idx} />)}
             </tr>
           </thead>
           <tbody>
             {showNewRow && editableMode && (
-              <tr className="border-b border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30">
-                <td className="sticky left-0 z-10 px-1 bg-emerald-50 dark:bg-emerald-950/30" style={{ width: 20 }} />
-                <td className="sticky px-2 py-1 bg-emerald-50 dark:bg-emerald-950/30 whitespace-nowrap" style={{ left: frozenLeftAction, zIndex: 10 }}>
+              <tr className="border-b border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950">
+                <td className="sticky left-0 z-10 px-2 py-1 bg-emerald-50 dark:bg-emerald-950 whitespace-nowrap" style={{ width: ACTION_W, minWidth: ACTION_W }}>
                   <div className="flex gap-1">
                     <button onClick={() => {
                       onCreateRow!(Object.fromEntries(result.columns.map((c) => [c, newRowValues[c] === NULL_SENTINEL ? null : (newRowValues[c] ?? null)])));
@@ -378,6 +370,13 @@ export function ResultsGrid({
               const rowid = pageRowids?.[rowIdx];
               const isEditing = editingRowid === rowid && rowid != null;
               const isSelected = selectedRows.has(absIdx);
+              // Solid bg colours for the action/frozen cells (no transparency — prevents
+              // content bleed-through when scrolled horizontally with sticky columns)
+              const actionBg = isEditing
+                ? "bg-blue-50 dark:bg-blue-950"
+                : isSelected
+                ? "bg-emerald-50 dark:bg-emerald-950"
+                : "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800";
               return (
                 <tr
                   key={rowIdx}
@@ -386,43 +385,33 @@ export function ResultsGrid({
                     isEditing ? "bg-blue-50 dark:bg-blue-950" : isSelected ? "bg-emerald-50 dark:bg-emerald-950" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/30",
                   ].join(" ")}
                 >
-                  {/* Checkbox cell */}
+                  {/* Combined action cell — always sticky at left:0 with solid background */}
                   <td
-                    className={[
-                      "sticky z-10 px-1 py-0.5 w-5",
-                      isEditing ? "bg-blue-50 dark:bg-blue-950" : isSelected ? "bg-emerald-50 dark:bg-emerald-950" : "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800",
-                    ].join(" ")}
-                    style={{ left: frozenLeftChk }}
+                    className={["sticky z-10 px-2 py-1 whitespace-nowrap", actionBg].join(" ")}
+                    style={{ left: 0, width: ACTION_W, minWidth: ACTION_W }}
                   >
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleRowSelect(absIdx)}
-                      className="accent-emerald-500"
-                    />
-                  </td>
-
-                  {editableMode && (
-                    <td
-                      className={[
-                        "sticky z-10 px-2 py-1 w-16 whitespace-nowrap",
-                        isEditing ? "bg-blue-50 dark:bg-blue-950" : isSelected ? "bg-emerald-50 dark:bg-emerald-950" : "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800",
-                      ].join(" ")}
-                      style={{ left: frozenLeftAction }}
-                    >
-                      {isEditing ? (
-                        <div className="flex gap-1">
-                          <button onClick={() => commitEdit(rowid!)} className="text-xs text-emerald-600 font-medium">Save</button>
-                          <button onClick={() => setEditingRowid(null)} className="text-xs text-zinc-400 hover:text-zinc-600">✕</button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => startEdit(rowIdx, rowid!)} className="text-xs text-zinc-400 hover:text-blue-500" title="Edit">✎</button>
-                          <button onClick={() => onDeleteRow!(rowid!, `Delete this row from "${activeTable}"?`)} className="text-xs text-zinc-400 hover:text-red-500" title="Delete">✕</button>
-                        </div>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleRowSelect(absIdx)}
+                        className="accent-emerald-500 shrink-0"
+                      />
+                      {editableMode && (
+                        isEditing ? (
+                          <>
+                            <button onClick={() => commitEdit(rowid!)} className="text-xs text-emerald-600 font-medium">Save</button>
+                            <button onClick={() => setEditingRowid(null)} className="text-xs text-zinc-400 hover:text-zinc-600">✕</button>
+                          </>
+                        ) : (
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => startEdit(rowIdx, rowid!)} className="text-xs text-zinc-400 hover:text-blue-500" title="Edit">✎</button>
+                            <button onClick={() => onDeleteRow!(rowid!, `Delete this row from "${activeTable}"?`)} className="text-xs text-zinc-400 hover:text-red-500" title="Delete">✕</button>
+                          </div>
+                        )
                       )}
-                    </td>
-                  )}
+                    </div>
+                  </td>
                   {row.map((cell, ci) => {
                     const isFrozen = ci < freezeCols;
                     const colName = result.columns[ci];
@@ -432,11 +421,13 @@ export function ResultsGrid({
                         className={[
                           "px-1 py-0.5",
                           isFrozen ? "sticky z-10 shadow-[2px_0_0_0_rgba(0,0,0,0.06)]" : "",
+                          // Solid backgrounds — no /opacity suffixes — so frozen cells fully
+                          // cover scrolled content behind them
                           isFrozen && !isEditing && !isSelected ? "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800" : "",
                           isFrozen && isEditing ? "bg-blue-50 dark:bg-blue-950" : "",
                           isFrozen && isSelected && !isEditing ? "bg-emerald-50 dark:bg-emerald-950" : "",
                         ].join(" ")}
-                        style={isFrozen ? { left: frozenLeftData(ci) } : undefined}
+                        style={isFrozen ? { left: frozenDataLeft(ci), minWidth: DATA_COL_W } : undefined}
                       >
                         {isEditing ? (
                           <NullableInput

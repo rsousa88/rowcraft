@@ -293,16 +293,9 @@ const nodeTypes: Record<string, any> = { tableNode: ErdTableNode, groupNode: Gro
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const edgeTypes: Record<string, any> = { dependencyEdge: DependencyEdge };
 
-interface Props {
-  db: Database | null;
-  dbName: string;
-  rowCounts: Record<string, number>;
-  // Layout from parent cache — eliminates GET/PUT race on view switch
-  initialLayout?: LayoutData | null;
-  onLayoutChange?: (layout: LayoutData) => void;
-}
+interface Props { db: Database | null; dbName: string; rowCounts: Record<string, number> }
 
-export function ErdDiagram({ db, dbName, rowCounts, initialLayout, onLayoutChange }: Props) {
+export function ErdDiagram({ db, dbName, rowCounts }: Props) {
   const { theme } = useTheme();
   const isDark = theme === "dark" || (theme === "auto" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
@@ -321,9 +314,7 @@ export function ErdDiagram({ db, dbName, rowCounts, initialLayout, onLayoutChang
 
   // savedLayout drives the layout effect — using state (not ref) ensures the effect
   // always re-runs with the correct positions after the async fetch completes.
-  // Initialised from the parent cache so remounting uses the last known positions
-  // immediately, eliminating the GET/PUT race on view switches.
-  const [savedLayout, setSavedLayout] = useState<LayoutData | null>(initialLayout ?? null);
+  const [savedLayout, setSavedLayout] = useState<LayoutData | null>(null);
 
   // Refs for use inside callbacks that can't close over changing state
   const savedLayoutRef = useRef<LayoutData | null>(null);
@@ -364,7 +355,6 @@ export function ErdDiagram({ db, dbName, rowCounts, initialLayout, onLayoutChang
       hiddenTables: [...hiddenTablesRef.current],
     };
     savedLayoutRef.current = payload;
-    onLayoutChange?.(payload);   // keep parent cache in sync on every drag
     if (saveLayoutPendingRef.current) clearTimeout(saveLayoutPendingRef.current);
     saveLayoutPendingRef.current = setTimeout(() => putLayout(payload), 800);
   }
@@ -402,9 +392,7 @@ export function ErdDiagram({ db, dbName, rowCounts, initialLayout, onLayoutChang
 
   useEffect(() => {
     if (!dbName) return;
-    // Seed ref from whatever was in the parent cache so saveLayout/saveDisplayPrefs
-    // can merge against it immediately (before the GET returns).
-    savedLayoutRef.current = initialLayout ?? null;
+    savedLayoutRef.current = null;
     const enc = encodeURIComponent(dbName);
     Promise.all([
       fetch(`/api/databases/${enc}/groups`).then(r => r.ok ? r.json() : []).catch(() => []),
@@ -438,19 +426,8 @@ export function ErdDiagram({ db, dbName, rowCounts, initialLayout, onLayoutChang
       setGroups(Array.isArray(g) ? g : []);
       setStoredDeps(Array.isArray(d) ? d : []);
 
-      // For POSITIONS: if we already have cached positions (initialLayout), trust the
-      // cache over the server because the cache reflects the most-recent drag and
-      // avoids the GET/PUT race where the GET resolves before the PUT persists.
-      // The layout effect will re-run when groups changes and will use the cached positions.
-      // On first visit (no cache), load positions from the server response.
-      if (!initialLayout?.positions) {
-        savedLayoutRef.current = serverLayout;
-        onLayoutChange?.(serverLayout);
-        setSavedLayout(serverLayout);
-      } else {
-        // Keep the cached positions, just update the ref with server settings merged in
-        savedLayoutRef.current = { ...serverLayout, positions: initialLayout.positions };
-      }
+      savedLayoutRef.current = serverLayout;
+      setSavedLayout(serverLayout);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbName]);

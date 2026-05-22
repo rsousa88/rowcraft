@@ -48,10 +48,6 @@ export function DbViewer({ dbName }: { dbName: string }) {
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
   const sidebarDragRef = useRef<{ startX: number; startW: number } | null>(null);
   const selectionRef = useRef<string>("");
-  // Persist the last known ERD layout across Schema↔Query view switches so
-  // ErdDiagram can initialize from it immediately (avoids GET/PUT race condition).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const erdLayoutCacheRef = useRef<any>(null);
 
   // ── column selection persistence ──────────────────────────────────────────
   function colsKey(table: string) { return `rc-cols-${dbName}-${table}`; }
@@ -634,85 +630,87 @@ export function DbViewer({ dbName }: { dbName: string }) {
           title="Drag to resize sidebar"
         />
 
-        {/* Main area */}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          {view === "schema" ? (
-            /* ── Schema / ER diagram view ── */
-            <ErdDiagram
-              db={db}
-              dbName={dbName}
-              rowCounts={rowCounts}
-              initialLayout={erdLayoutCacheRef.current}
-              onLayoutChange={(l) => { erdLayoutCacheRef.current = l; }}
-            />
-          ) : (
-            /* ── Query view ── */
-            <>
-              {/* Editor toolbar */}
-              <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1.5 flex items-center gap-2">
-                <SavedQueries dbName={dbName} activeTable={activeTable} currentSql={sqlText} onLoad={loadQuery} />
-                <QueryHistory dbName={dbName} onLoad={loadQueryToEditor} />
-                <div className="ml-auto flex items-center gap-1.5 shrink-0">
-                  {hasSelection && (
-                    <button
-                      onClick={() => runQuery(selectionRef.current)}
-                      disabled={!db || running}
-                      className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
-                      title="Run selected SQL (Ctrl/Cmd+Enter)"
-                    >
-                      Run Selected
-                    </button>
-                  )}
+        {/* Main area — both views always mounted; CSS display toggles visibility so
+            ErdDiagram React state (node positions, zoom) persists across view switches */}
+        <div className="flex flex-1 overflow-hidden relative">
+
+          {/* ── Schema / ER diagram view (always mounted) ── */}
+          <div
+            className="flex flex-1 overflow-hidden"
+            style={{ display: view === "schema" ? "flex" : "none" }}
+          >
+            <ErdDiagram db={db} dbName={dbName} rowCounts={rowCounts} />
+          </div>
+
+          {/* ── Query view (always mounted) ── */}
+          <div
+            className="flex flex-1 flex-col overflow-hidden"
+            style={{ display: view === "query" ? "flex" : "none" }}
+          >
+            {/* Editor toolbar */}
+            <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1.5 flex items-center gap-2">
+              <SavedQueries dbName={dbName} activeTable={activeTable} currentSql={sqlText} onLoad={loadQuery} />
+              <QueryHistory dbName={dbName} onLoad={loadQueryToEditor} />
+              <div className="ml-auto flex items-center gap-1.5 shrink-0">
+                {hasSelection && (
                   <button
-                    onClick={() => runQuery()}
+                    onClick={() => runQuery(selectionRef.current)}
                     disabled={!db || running}
-                    className="rounded-md bg-emerald-600 px-4 py-1 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors"
-                    title="Run query (Ctrl/Cmd+Enter)"
+                    className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+                    title="Run selected SQL (Ctrl/Cmd+Enter)"
                   >
-                    {running ? "Running…" : "▶ Run"}
+                    Run Selected
                   </button>
-                </div>
-              </div>
-
-              {/* SQL editor */}
-              <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 overflow-hidden" style={{ height: editorHeight }}>
-                <CodeMirrorEditor
-                  value={sqlText}
-                  onChange={setSqlText}
-                  onSelectionChange={(s) => { selectionRef.current = s; setHasSelection(s.length > 0); }}
-                  tables={tables}
-                  columns={columns}
-                  theme={editorTheme}
-                />
-              </div>
-
-              {/* Resize handle */}
-              <div
-                onMouseDown={onDragStart}
-                className="shrink-0 h-1.5 cursor-row-resize bg-zinc-100 dark:bg-zinc-800 hover:bg-emerald-200 dark:hover:bg-emerald-900 transition-colors border-b border-zinc-200 dark:border-zinc-800"
-                title="Drag to resize editor"
-              />
-
-              {/* Results */}
-              <div className="flex-1 overflow-hidden flex flex-col">
-                {result ? (
-                  <ResultsGrid
-                    result={result}
-                    activeTable={activeTable}
-                    tableTotal={activeTable ? rowCounts[activeTable] : undefined}
-                    rowids={isTableView ? rowids : undefined}
-                    onEditRow={isTableView ? handleEditRow : undefined}
-                    onDeleteRow={isTableView ? handleDeleteRow : undefined}
-                    onCreateRow={isTableView ? handleCreateRow : undefined}
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600 text-sm">
-                    {db ? "Run a query to see results" : "Loading database…"}
-                  </div>
                 )}
+                <button
+                  onClick={() => runQuery()}
+                  disabled={!db || running}
+                  className="rounded-md bg-emerald-600 px-4 py-1 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors"
+                  title="Run query (Ctrl/Cmd+Enter)"
+                >
+                  {running ? "Running…" : "▶ Run"}
+                </button>
               </div>
-            </>
-          )}
+            </div>
+
+            {/* SQL editor */}
+            <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 overflow-hidden" style={{ height: editorHeight }}>
+              <CodeMirrorEditor
+                value={sqlText}
+                onChange={setSqlText}
+                onSelectionChange={(s) => { selectionRef.current = s; setHasSelection(s.length > 0); }}
+                tables={tables}
+                columns={columns}
+                theme={editorTheme}
+              />
+            </div>
+
+            {/* Resize handle */}
+            <div
+              onMouseDown={onDragStart}
+              className="shrink-0 h-1.5 cursor-row-resize bg-zinc-100 dark:bg-zinc-800 hover:bg-emerald-200 dark:hover:bg-emerald-900 transition-colors border-b border-zinc-200 dark:border-zinc-800"
+              title="Drag to resize editor"
+            />
+
+            {/* Results */}
+            <div className="flex-1 overflow-hidden flex flex-col">
+              {result ? (
+                <ResultsGrid
+                  result={result}
+                  activeTable={activeTable}
+                  tableTotal={activeTable ? rowCounts[activeTable] : undefined}
+                  rowids={isTableView ? rowids : undefined}
+                  onEditRow={isTableView ? handleEditRow : undefined}
+                  onDeleteRow={isTableView ? handleDeleteRow : undefined}
+                  onCreateRow={isTableView ? handleCreateRow : undefined}
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600 text-sm">
+                  {db ? "Run a query to see results" : "Loading database…"}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

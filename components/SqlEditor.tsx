@@ -2,11 +2,11 @@
 
 import { useRef, useEffect } from "react";
 import CodeMirror, { EditorView, keymap } from "@uiw/react-codemirror";
-import { sql, SQLite, SQLNamespace } from "@codemirror/lang-sql";
+import { sql, SQLite, keywordCompletionSource } from "@codemirror/lang-sql";
 import { Compartment } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { githubLight } from "@uiw/codemirror-theme-github";
-import { autocompletion, startCompletion } from "@codemirror/autocomplete";
+import { autocompletion, startCompletion, type CompletionContext } from "@codemirror/autocomplete";
 import { toggleComment } from "@codemirror/commands";
 
 interface Props {
@@ -18,32 +18,48 @@ interface Props {
   theme: "light" | "dark";
 }
 
-function buildSqlExt(tables: string[], columns: Record<string, string[]>) {
-  const schema: SQLNamespace = {};
-  for (const t of tables) {
-    schema[t] = columns[t] ?? [];
-  }
-  return sql({ dialect: SQLite, schema, upperCaseKeywords: true });
+// Always-on completion source for table/column names — fires on any word match
+// without relying on SQL syntax-tree context detection (which often misses partial SQL).
+function makeSchemaSource(tables: string[], columns: Record<string, string[]>) {
+  return (ctx: CompletionContext) => {
+    const word = ctx.matchBefore(/\w+/);
+    if (!word || (word.from === word.to && !ctx.explicit)) return null;
+
+    const seen = new Set<string>();
+    const opts = [
+      ...tables.map(t => ({ label: t, type: "class" as const, detail: "table", boost: 2 })),
+      ...Object.entries(columns).flatMap(([tbl, cols]) =>
+        cols.map(c => ({ label: c, type: "property" as const, detail: tbl }))
+      ),
+    ].filter(o => { if (seen.has(o.label)) return false; seen.add(o.label); return true; });
+
+    return { from: word.from, options: opts, validFor: /^\w*$/ };
+  };
 }
 
-export default function SqlEditor({ value, onChange, onSelectionChange, tables, columns, theme }: Props) {
-  const viewRef = useRef<EditorView | null>(null);
-  // Compartment lets us swap the SQL extension (with its schema) without rebuilding the editor
-  const sqlCompartment = useRef(new Compartment());
+function buildExtensions(
+  tables: string[],
+  columns: Record<string, string[]>,
+  completionCompartment: Compartment,
+  selectionCb: (s: string) => void
+) {
+  return [
+    // SQL language (syntax highlight + keyword completions)
+    sql({ dialect: SQLite, upperCaseKeywords: true }),
 
-  // Push updated schema into the live editor whenever tables/columns change
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    view.dispatch({
-      effects: sqlCompartment.current.reconfigure(buildSqlExt(tables, columns)),
-    });
-  }, [tables, columns]);
+    // Autocomplete: SQL keywords + always-on schema completions — in a Compartment
+    // so it can be swapped when tables/columns load without rebuilding the editor.
+    completionCompartment.of(
+      autocompletion({
+        activateOnTyping: true,
+        override: [
+          keywordCompletionSource(SQLite, true),
+          makeSchemaSource(tables, columns),
+        ],
+      })
+    ),
 
-  const extensions = [
-    sqlCompartment.current.of(buildSqlExt(tables, columns)),
     EditorView.lineWrapping,
-    autocompletion({ activateOnTyping: true }),
     keymap.of([
       { key: "Ctrl-Space", mac: "Cmd-Space", run: startCompletion },
       { key: "Ctrl-k Ctrl-c", mac: "Cmd-k Cmd-c", run: (v) => { toggleComment(v); return true; } },
@@ -54,9 +70,31 @@ export default function SqlEditor({ value, onChange, onSelectionChange, tables, 
         update.state.selection.main.from,
         update.state.selection.main.to
       );
-      onSelectionChange(sel);
+      selectionCb(sel);
     }),
   ];
+}
+
+export default function SqlEditor({ value, onChange, onSelectionChange, tables, columns, theme }: Props) {
+  const viewRef = useRef<EditorView | null>(null);
+  const completionCompartment = useRef(new Compartment());
+
+  // Push updated schema into the live editor whenever tables/columns arrive
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: completionCompartment.current.reconfigure(
+        autocompletion({
+          activateOnTyping: true,
+          override: [
+            keywordCompletionSource(SQLite, true),
+            makeSchemaSource(tables, columns),
+          ],
+        })
+      ),
+    });
+  }, [tables, columns]);
 
   return (
     <CodeMirror
@@ -64,14 +102,14 @@ export default function SqlEditor({ value, onChange, onSelectionChange, tables, 
       height="100%"
       style={{ height: "100%" }}
       theme={theme === "dark" ? oneDark : githubLight}
-      extensions={extensions}
+      extensions={buildExtensions(tables, columns, completionCompartment.current, onSelectionChange)}
       onChange={onChange}
       onCreateEditor={(view) => { viewRef.current = view; }}
       basicSetup={{
         lineNumbers: true,
         highlightActiveLine: true,
         bracketMatching: true,
-        autocompletion: false,
+        autocompletion: false, // managed above
         defaultKeymap: true,
       }}
     />
