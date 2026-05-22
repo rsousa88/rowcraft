@@ -26,6 +26,8 @@ interface DragItem {
 
 interface Props {
   dbName: string;
+  width: number;
+  groupsVersion: number;
   tables: string[];
   columns: Record<string, string[]>;
   selectedCols: Record<string, Set<string>>;
@@ -54,7 +56,7 @@ function persistGroups(dbName: string, groups: GroupDef[]) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function TableSidebar({
-  dbName, tables, columns, selectedCols, activeTable, rowCounts,
+  dbName, width, groupsVersion, tables, columns, selectedCols, activeTable, rowCounts,
   onTableSelect, onColToggle, onAllColsToggle, onSchemaAction, loading,
 }: Props) {
   // ── existing state ──
@@ -75,12 +77,13 @@ export function TableSidebar({
   const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
   const [renameGroupValue, setRenameGroupValue] = useState("");
   const [dragItem, setDragItem] = useState<DragItem | null>(null);
-  const [dragTarget, setDragTarget] = useState<string | null>(null); // group id | "ungrouped" | "group:{id}" (header for reorder)
+  const [dragTarget, setDragTarget] = useState<string | null>(null);
+  const [dragOverTable, setDragOverTable] = useState<{ table: string; half: "top" | "bottom" } | null>(null);
   const newGroupInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setGroups(loadGroups(dbName));
-  }, [dbName]);
+  }, [dbName, groupsVersion]);
 
   function updateGroups(next: GroupDef[]) {
     setGroups(next);
@@ -179,6 +182,7 @@ export function TableSidebar({
   function onDragEnd() {
     setDragItem(null);
     setDragTarget(null);
+    setDragOverTable(null);
   }
 
   // ── table row renderer (preserves all existing functionality) ──
@@ -190,20 +194,63 @@ export function TableSidebar({
     const allChecked = cols.every((c) => sel.has(c));
     const someChecked = cols.some((c) => sel.has(c));
 
+    const isOverTop = dragOverTable?.table === table && dragOverTable.half === "top";
+    const isOverBottom = dragOverTable?.table === table && dragOverTable.half === "bottom";
+
     return (
       <div key={table}>
-        <div className={[
-          "flex items-center gap-1 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 group",
-          indent ? "pl-2 pr-3" : "px-3",
-          table === activeTable ? "bg-zinc-100 dark:bg-zinc-800/60" : "",
-        ].join(" ")}>
-          {/* Drag handle — only this element is draggable to avoid button conflicts */}
+        <div
+          className={[
+            "flex items-center gap-1 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 group",
+            indent ? "pl-2 pr-3" : "px-3",
+            table === activeTable ? "bg-zinc-100 dark:bg-zinc-800/60" : "",
+            isOverTop ? "border-t-2 border-emerald-400" : "",
+            isOverBottom ? "border-b-2 border-emerald-400" : "",
+          ].join(" ")}
+          onDragOver={(e) => {
+            if (dragItem?.type !== "table" || dragItem.id === table) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            const half = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+            setDragOverTable({ table, half });
+            setDragTarget(fromGroup ?? "ungrouped");
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverTable(null);
+          }}
+          onDrop={(e) => {
+            if (dragItem?.type !== "table" || dragItem.id === table) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const dragged = dragItem.id;
+            const insertBefore = dragOverTable?.half !== "bottom";
+            if (fromGroup === null) {
+              // Reordering within ungrouped: no-op (ungrouped order is DB order)
+            } else {
+              let next = groups.map((g) => ({ ...g, tables: g.tables.filter((t) => t !== dragged) }));
+              next = next.map((g) => {
+                if (g.id !== fromGroup) return g;
+                const idx = g.tables.indexOf(table);
+                const insertIdx = insertBefore ? idx : idx + 1;
+                const t = [...g.tables];
+                t.splice(Math.max(0, insertIdx), 0, dragged);
+                return { ...g, tables: t };
+              });
+              updateGroups(next);
+            }
+            setDragItem(null);
+            setDragTarget(null);
+            setDragOverTable(null);
+          }}
+        >
+          {/* Drag handle */}
           <span
             draggable
             onDragStart={(e) => { e.stopPropagation(); onTableDragStart(e, table, fromGroup); }}
             onDragEnd={onDragEnd}
             className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing text-zinc-300 dark:text-zinc-600 shrink-0 select-none text-xs px-0.5"
-            title="Drag to move to a group"
+            title="Drag to reorder or move to a group"
           >
             ⠿
           </span>
@@ -224,7 +271,7 @@ export function TableSidebar({
           />
           <button
             className="ml-1 flex-1 text-left text-sm truncate text-zinc-700 dark:text-zinc-200 hover:text-zinc-900 dark:hover:text-white"
-            onClick={() => { onTableSelect(table); setExpanded(new Set([table])); }}
+            onClick={() => onTableSelect(table)}
           >
             {table}
           </button>
@@ -335,14 +382,17 @@ export function TableSidebar({
   // ── loading state ──
   if (loading) {
     return (
-      <aside className="w-56 shrink-0 border-r border-zinc-200 dark:border-zinc-800 p-4 text-xs text-zinc-400 dark:text-zinc-500">
+      <aside className="shrink-0 border-r border-zinc-200 dark:border-zinc-800 p-4 text-xs text-zinc-400 dark:text-zinc-500" style={{ width }}>
         Loading…
       </aside>
     );
   }
 
   return (
-    <aside className="w-56 shrink-0 border-r border-zinc-200 dark:border-zinc-800 overflow-y-auto bg-zinc-50 dark:bg-zinc-950 flex flex-col">
+    <aside
+      className="shrink-0 border-r border-zinc-200 dark:border-zinc-800 overflow-y-auto bg-zinc-50 dark:bg-zinc-950 flex flex-col"
+      style={{ width: width }}
+    >
       {/* Header */}
       <div className="shrink-0 px-3 pt-3 pb-1 flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Tables</span>

@@ -41,8 +41,49 @@ export function DbViewer({ dbName }: { dbName: string }) {
   const [saving, setSaving] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [editorHeight, setEditorHeight] = useState(200);
+  const [sidebarWidth, setSidebarWidth] = useState(224);
+  const [groupsVersion, setGroupsVersion] = useState(0);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const sidebarDragRef = useRef<{ startX: number; startW: number } | null>(null);
   const selectionRef = useRef<string>("");
+
+  // ── column selection persistence ──────────────────────────────────────────
+  function colsKey(table: string) { return `rc-cols-${dbName}-${table}`; }
+
+  function loadPersistedCols(table: string, allCols: string[]): Set<string> {
+    try {
+      const stored = localStorage.getItem(colsKey(table));
+      if (!stored) return new Set(allCols);
+      const arr: string[] = JSON.parse(stored);
+      const valid = arr.filter((c) => allCols.includes(c));
+      return valid.length > 0 ? new Set(valid) : new Set(allCols);
+    } catch { return new Set(allCols); }
+  }
+
+  function persistCols(table: string, cols: Set<string>, allCols: string[]) {
+    if (cols.size === allCols.length && allCols.every((c) => cols.has(c))) {
+      localStorage.removeItem(colsKey(table));
+    } else {
+      localStorage.setItem(colsKey(table), JSON.stringify([...cols]));
+    }
+  }
+
+  // ── sidebar resize ────────────────────────────────────────────────────────
+  function onSidebarDragStart(e: React.MouseEvent) {
+    e.preventDefault();
+    sidebarDragRef.current = { startX: e.clientX, startW: sidebarWidth };
+    function onMove(ev: MouseEvent) {
+      if (!sidebarDragRef.current) return;
+      setSidebarWidth(Math.max(150, Math.min(400, sidebarDragRef.current.startW + ev.clientX - sidebarDragRef.current.startX)));
+    }
+    function onUp() {
+      sidebarDragRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
 
   // Load the database file via signed URL
   useEffect(() => {
@@ -342,7 +383,10 @@ export function DbViewer({ dbName }: { dbName: string }) {
   function handleTableSelect(table: string) {
     setActiveTable(table);
     setResult(null);
-    const q = buildQuery(table, selectedCols[table] ?? new Set(columns[table]), columns[table] ?? []);
+    const allCols = columns[table] ?? [];
+    const cols = loadPersistedCols(table, allCols); // restore last column selection
+    setSelectedCols((prev) => ({ ...prev, [table]: cols }));
+    const q = buildQuery(table, cols, allCols);
     setSqlText(q);
     execQuery(q, true, table);
   }
@@ -351,8 +395,21 @@ export function DbViewer({ dbName }: { dbName: string }) {
     const newCols = new Set(selectedCols[table]);
     checked ? newCols.add(col) : newCols.delete(col);
     setSelectedCols((prev) => ({ ...prev, [table]: newCols }));
+    persistCols(table, newCols, columns[table] ?? []);
     if (table === activeTable) {
       const q = buildQuery(table, newCols, columns[table] ?? []);
+      setSqlText(q);
+      execQuery(q, true, table);
+    }
+  }
+
+  function handleAllColsToggle(table: string, checked: boolean) {
+    const allCols = columns[table] ?? [];
+    const newCols = checked ? new Set(allCols) : new Set<string>();
+    setSelectedCols((prev) => ({ ...prev, [table]: newCols }));
+    persistCols(table, newCols, allCols);
+    if (table === activeTable) {
+      const q = buildQuery(table, newCols, allCols);
       setSqlText(q);
       execQuery(q, true, table);
     }
@@ -367,7 +424,6 @@ export function DbViewer({ dbName }: { dbName: string }) {
       } else if (action.type === "renameCol") {
         database.run(`ALTER TABLE "${action.table}" RENAME COLUMN "${action.column}" TO "${action.value}"`);
       } else if (action.type === "dropCol") {
-        // Try direct DROP (SQLite 3.35+); fall back to table rebuild
         try {
           database.run(`ALTER TABLE "${action.table}" DROP COLUMN "${action.column}"`);
         } catch {
@@ -379,10 +435,31 @@ export function DbViewer({ dbName }: { dbName: string }) {
           database.run(`ALTER TABLE "__tmp_${action.table}" RENAME TO "${action.table}"`);
           database.run(`COMMIT`);
         }
-      } else if (action.type === "renameTable") {
+      } else if (action.type === "renameTable" && action.value) {
         database.run(`ALTER TABLE "${action.table}" RENAME TO "${action.value}"`);
+        // Keep group membership and saved queries in sync
+        const gKey = `rc-table-groups-${dbName}`;
+        try {
+          const stored = JSON.parse(localStorage.getItem(gKey) ?? "[]");
+          const updated = stored.map((g: { tables: string[] }) => ({
+            ...g,
+            tables: g.tables.map((t: string) => t === action.table ? action.value : t),
+          }));
+          localStorage.setItem(gKey, JSON.stringify(updated));
+          setGroupsVersion((v) => v + 1);
+        } catch { /* non-fatal */ }
+        // Migrate saved queries key
+        const oldQKey = `rc-queries-${dbName}-${action.table}`;
+        const newQKey = `rc-queries-${dbName}-${action.value}`;
+        const existingQ = localStorage.getItem(oldQKey);
+        if (existingQ) { localStorage.setItem(newQKey, existingQ); localStorage.removeItem(oldQKey); }
+        // Migrate persisted column selection key
+        const oldCKey = colsKey(action.table);
+        const newCKey = colsKey(action.value);
+        const existingC = localStorage.getItem(oldCKey);
+        if (existingC) { localStorage.setItem(newCKey, existingC); localStorage.removeItem(oldCKey); }
       }
-      // Refresh tables + columns
+      // Refresh schema
       const tableRes = database.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;");
       const tableNames = tableRes[0]?.values.map((r) => r[0] as string) ?? [];
       setTables(tableNames);
@@ -396,7 +473,6 @@ export function DbViewer({ dbName }: { dbName: string }) {
       }
       setColumns(colMap);
       setSelectedCols(selMap);
-      // Re-run active query if table still exists
       const newName = action.type === "renameTable" ? action.value! : action.table;
       if (tableNames.includes(newName)) {
         const q = buildQuery(newName, selMap[newName], colMap[newName] ?? []);
@@ -412,37 +488,19 @@ export function DbViewer({ dbName }: { dbName: string }) {
   // Load a query from saved/history, syncing column checkboxes from the SELECT list
   function loadQuery(q: string) {
     setSqlText(q);
-    // Try to detect table name from FROM clause
     const fromMatch = q.match(/FROM\s+"?([^"\s;]+)"?/i);
     const table = fromMatch?.[1];
     if (!table || !columns[table]) { execQuery(q); return; }
-
     setActiveTable(table);
-
-    // Detect selected columns from SELECT clause
     const selectPart = q.match(/^SELECT\s+([\s\S]+?)\s+FROM/i)?.[1]?.trim();
     if (!selectPart || selectPart === "*") {
-      // SELECT * — all columns checked
       setSelectedCols((p) => ({ ...p, [table]: new Set(columns[table]) }));
     } else {
-      // Parse quoted column names: "col1", "col2"
       const parsed = new Set<string>();
       for (const m of selectPart.matchAll(/"([^"]+)"/g)) parsed.add(m[1]);
       if (parsed.size > 0) setSelectedCols((p) => ({ ...p, [table]: parsed }));
     }
-
     execQuery(q, true, table);
-  }
-
-  function handleAllColsToggle(table: string, checked: boolean) {
-    const allCols = columns[table] ?? [];
-    const newCols = checked ? new Set(allCols) : new Set<string>();
-    setSelectedCols((prev) => ({ ...prev, [table]: newCols }));
-    if (table === activeTable) {
-      const q = buildQuery(table, newCols, allCols);
-      setSqlText(q);
-      execQuery(q, true, table);
-    }
   }
 
   if (loadError) {
@@ -498,6 +556,8 @@ export function DbViewer({ dbName }: { dbName: string }) {
         {/* Sidebar */}
         <TableSidebar
           dbName={dbName}
+          width={sidebarWidth}
+          groupsVersion={groupsVersion}
           tables={tables}
           columns={columns}
           selectedCols={selectedCols}
@@ -510,11 +570,18 @@ export function DbViewer({ dbName }: { dbName: string }) {
           loading={!db && !loadError}
         />
 
+        {/* Sidebar resize handle */}
+        <div
+          onMouseDown={onSidebarDragStart}
+          className="w-1 shrink-0 cursor-col-resize bg-zinc-200 dark:bg-zinc-800 hover:bg-emerald-400 dark:hover:bg-emerald-600 transition-colors"
+          title="Drag to resize sidebar"
+        />
+
         {/* Main area */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Saved queries + history toolbar */}
           <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1.5 flex items-center gap-2 flex-wrap">
-            <SavedQueries dbName={dbName} currentSql={sqlText} onLoad={loadQuery} />
+            <SavedQueries dbName={dbName} activeTable={activeTable} currentSql={sqlText} onLoad={loadQuery} />
             <QueryHistory dbName={dbName} onLoad={loadQuery} />
           </div>
 

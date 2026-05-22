@@ -60,45 +60,9 @@ A web-based SQLite viewer and editor. Upload `.db` files, browse tables, run SQL
 
 ---
 
-## Running locally
+## Getting started
 
-### Prerequisites
-- Node.js 18+
-- A [Clerk](https://clerk.com) account (free)
-- A [Supabase](https://supabase.com) project with a private `databases` storage bucket (free)
-
-### Setup
-
-```bash
-git clone https://github.com/rsousa88/rowcraft.git
-cd rowcraft
-npm install
-cp .env.local.example .env.local
-```
-
-Fill in `.env.local`:
-
-```env
-# Clerk — from your Clerk dashboard → API Keys
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-CLERK_SECRET_KEY=sk_test_...
-NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
-NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
-
-# Supabase — from Project Settings → API
-SUPABASE_URL=https://xxxx.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=sb_secret_...
-```
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
-### Supabase bucket
-
-In your Supabase project, go to **Storage → New bucket**, name it `databases`, and keep it **private**.
+Sign up for a free account at [rowcraft-jet.vercel.app](https://rowcraft-jet.vercel.app) — no installation required.
 
 ---
 

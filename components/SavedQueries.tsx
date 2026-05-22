@@ -9,40 +9,41 @@ interface SavedQuery {
 
 interface Props {
   dbName: string;
+  activeTable: string | null;
   currentSql: string;
   onLoad: (sql: string) => void;
 }
 
-function storageKey(dbName: string) {
-  return `rc-queries-${dbName}`;
+export function savedQueriesKey(dbName: string, table: string | null) {
+  return table ? `rc-queries-${dbName}-${table}` : `rc-queries-${dbName}`;
 }
 
-function load(dbName: string): SavedQuery[] {
+function load(dbName: string, table: string | null): SavedQuery[] {
   try {
-    return JSON.parse(localStorage.getItem(storageKey(dbName)) ?? "[]");
+    return JSON.parse(localStorage.getItem(savedQueriesKey(dbName, table)) ?? "[]");
   } catch {
     return [];
   }
 }
 
-function save(dbName: string, queries: SavedQuery[]) {
-  localStorage.setItem(storageKey(dbName), JSON.stringify(queries));
+function save(dbName: string, table: string | null, queries: SavedQuery[]) {
+  localStorage.setItem(savedQueriesKey(dbName, table), JSON.stringify(queries));
 }
 
-export function SavedQueries({ dbName, currentSql, onLoad }: Props) {
+export function SavedQueries({ dbName, activeTable, currentSql, onLoad }: Props) {
   const [queries, setQueries] = useState<SavedQuery[]>([]);
   const [savingName, setSavingName] = useState("");
   const [showInput, setShowInput] = useState(false);
 
   useEffect(() => {
-    setQueries(load(dbName));
-  }, [dbName]);
+    setQueries(load(dbName, activeTable));
+  }, [dbName, activeTable]);
 
   function handleSave() {
     const name = savingName.trim();
     if (!name) return;
     const updated = [...queries.filter((q) => q.name !== name), { name, sql: currentSql }];
-    save(dbName, updated);
+    save(dbName, activeTable, updated);
     setQueries(updated);
     setSavingName("");
     setShowInput(false);
@@ -51,7 +52,7 @@ export function SavedQueries({ dbName, currentSql, onLoad }: Props) {
   function handleDelete(name: string) {
     if (!confirm(`Delete query "${name}"?`)) return;
     const updated = queries.filter((q) => q.name !== name);
-    save(dbName, updated);
+    save(dbName, activeTable, updated);
     setQueries(updated);
   }
 
