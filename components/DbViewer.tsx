@@ -514,14 +514,16 @@ export function DbViewer({ dbName }: { dbName: string }) {
   return (
     <div className="flex h-screen flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-hidden">
       {/* Header */}
-      <header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 px-4 py-2">
-        <Link href="/" className="hover:opacity-80 transition-opacity">
+      <header className="flex shrink-0 items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 px-4 py-2">
+        {/* Breadcrumb */}
+        <Link href="/" className="hover:opacity-80 transition-opacity shrink-0">
           <Logo size={22} />
         </Link>
         <span className="text-zinc-300 dark:text-zinc-600">/</span>
-        <span className="text-sm font-medium truncate text-zinc-600 dark:text-zinc-400">{dbName}</span>
-        <div className="ml-auto flex items-center gap-2">
-          {/* Import CSV */}
+        <span className="text-sm font-medium truncate text-zinc-600 dark:text-zinc-400 min-w-0">{dbName}</span>
+
+        {/* File actions */}
+        <div className="ml-auto flex items-center gap-1.5 shrink-0">
           <label
             className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
             title="Import CSV as a new table"
@@ -529,23 +531,26 @@ export function DbViewer({ dbName }: { dbName: string }) {
             Import CSV
             <input type="file" accept=".csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportCsv(f); e.target.value = ""; }} />
           </label>
-          <ThemeToggle />
-          <button onClick={() => setShowShortcuts(true)} className="rounded-md p-1.5 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors" title="Keyboard shortcuts (?)">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
-          </button>
-          {hasSelection && (
-            <button onClick={() => runQuery(selectionRef.current)} disabled={!db || running} className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors" title="Run selected SQL">
-              Run Selected
-            </button>
-          )}
-          <button onClick={() => runQuery()} disabled={!db || running} className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors">
-            {running ? "Running…" : "Run"}
-          </button>
           <button onClick={handleSave} disabled={!db || saving} className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors">
             {saving ? "Saving…" : "Save"}
           </button>
           <button onClick={handleDownload} disabled={!db} className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors">
             Download
+          </button>
+
+          {/* Divider */}
+          <span className="mx-1 h-4 w-px bg-zinc-200 dark:bg-zinc-700 shrink-0" />
+
+          {/* Utility buttons */}
+          <ThemeToggle />
+          <button
+            onClick={() => setShowShortcuts(true)}
+            className="rounded-md p-1.5 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            title="Keyboard shortcuts (?)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>
+            </svg>
           </button>
         </div>
       </header>
@@ -579,10 +584,30 @@ export function DbViewer({ dbName }: { dbName: string }) {
 
         {/* Main area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Saved queries + history toolbar */}
-          <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1.5 flex items-center gap-2 flex-wrap">
+          {/* Editor toolbar — saved queries left, run buttons right */}
+          <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1.5 flex items-center gap-2">
             <SavedQueries dbName={dbName} activeTable={activeTable} currentSql={sqlText} onLoad={loadQuery} />
             <QueryHistory dbName={dbName} onLoad={loadQuery} />
+            <div className="ml-auto flex items-center gap-1.5 shrink-0">
+              {hasSelection && (
+                <button
+                  onClick={() => runQuery(selectionRef.current)}
+                  disabled={!db || running}
+                  className="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+                  title="Run selected SQL (Ctrl/Cmd+Enter)"
+                >
+                  Run Selected
+                </button>
+              )}
+              <button
+                onClick={() => runQuery()}
+                disabled={!db || running}
+                className="rounded-md bg-emerald-600 px-4 py-1 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors"
+                title="Run query (Ctrl/Cmd+Enter)"
+              >
+                {running ? "Running…" : "▶ Run"}
+              </button>
+            </div>
           </div>
 
           {/* SQL editor — resizable */}
