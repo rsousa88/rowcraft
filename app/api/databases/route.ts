@@ -14,7 +14,9 @@ export async function GET() {
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data ?? []);
+  // Filter out sidecar metadata files (.groups.json)
+  const dbs = (data ?? []).filter((f) => !f.name.endsWith(".groups.json"));
+  return NextResponse.json(dbs);
 }
 
 export async function POST(req: NextRequest) {

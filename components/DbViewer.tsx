@@ -446,6 +446,12 @@ export function DbViewer({ dbName }: { dbName: string }) {
             tables: g.tables.map((t: string) => t === action.table ? action.value : t),
           }));
           localStorage.setItem(gKey, JSON.stringify(updated));
+          // Also persist to server so other machines see the updated name immediately
+          fetch(`/api/databases/${encodeURIComponent(dbName)}/groups`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updated),
+          }).catch(() => {});
           setGroupsVersion((v) => v + 1);
         } catch { /* non-fatal */ }
         // Migrate saved queries key

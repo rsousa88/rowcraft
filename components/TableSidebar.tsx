@@ -80,14 +80,47 @@ export function TableSidebar({
   const [dragTarget, setDragTarget] = useState<string | null>(null);
   const [dragOverTable, setDragOverTable] = useState<{ table: string; half: "top" | "bottom" } | null>(null);
   const newGroupInputRef = useRef<HTMLInputElement>(null);
+  const savePendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Load groups from server; fall back to localStorage and migrate if needed
   useEffect(() => {
-    setGroups(loadGroups(dbName));
-  }, [dbName, groupsVersion]);
+    let cancelled = false;
+    async function fetchGroups() {
+      try {
+        const res = await fetch(`/api/databases/${encodeURIComponent(dbName)}/groups`);
+        if (cancelled) return;
+        if (res.ok) {
+          const data: GroupDef[] = await res.json();
+          setGroups(data);
+          persistGroups(dbName, data); // keep localStorage in sync
+        } else {
+          // Server returned error — fall back to localStorage and upload it
+          const local = loadGroups(dbName);
+          setGroups(local);
+          if (local.length > 0) saveToServer(dbName, local);
+        }
+      } catch {
+        if (!cancelled) setGroups(loadGroups(dbName));
+      }
+    }
+    fetchGroups();
+    return () => { cancelled = true; };
+  }, [dbName, groupsVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function saveToServer(name: string, grps: GroupDef[]) {
+    fetch(`/api/databases/${encodeURIComponent(name)}/groups`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(grps),
+    }).catch(() => { /* non-fatal */ });
+  }
 
   function updateGroups(next: GroupDef[]) {
     setGroups(next);
-    persistGroups(dbName, next);
+    persistGroups(dbName, next); // instant localStorage update
+    // Debounced server save (avoids a PUT on every drag event)
+    if (savePendingRef.current) clearTimeout(savePendingRef.current);
+    savePendingRef.current = setTimeout(() => saveToServer(dbName, next), 600);
   }
 
   // ── derived ──
