@@ -1,11 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface SavedQuery {
   name: string;
   sql: string;
 }
+
+// Full map stored server-side: { [tableKey]: SavedQuery[] }
+// tableKey = table name, or "__global__" for queries saved without an active table
+type QueriesMap = Record<string, SavedQuery[]>;
+
+const GLOBAL_KEY = "__global__";
 
 interface Props {
   dbName: string;
@@ -14,46 +20,117 @@ interface Props {
   onLoad: (sql: string) => void;
 }
 
+// ── localStorage helpers ───────────────────────────────────────────────────────
+
+function fullMapLsKey(dbName: string) {
+  return `rc-queries-v2-${dbName}`;
+}
+
+function loadFullMapFromLs(dbName: string): QueriesMap {
+  try {
+    const stored = localStorage.getItem(fullMapLsKey(dbName));
+    if (stored) return JSON.parse(stored);
+
+    // Migrate from old per-table keys (rc-queries-{dbName} and rc-queries-{dbName}-{table})
+    const map: QueriesMap = {};
+    const globalOld = localStorage.getItem(`rc-queries-${dbName}`);
+    if (globalOld) {
+      const q = JSON.parse(globalOld);
+      if (q.length) map[GLOBAL_KEY] = q;
+    }
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(`rc-queries-${dbName}-`)) continue;
+      const tableKey = key.slice(`rc-queries-${dbName}-`.length);
+      const q = JSON.parse(localStorage.getItem(key) ?? "[]");
+      if (q.length) map[tableKey] = q;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function persistFullMap(dbName: string, map: QueriesMap) {
+  localStorage.setItem(fullMapLsKey(dbName), JSON.stringify(map));
+}
+
+// ── component ─────────────────────────────────────────────────────────────────
+
 export function savedQueriesKey(dbName: string, table: string | null) {
   return table ? `rc-queries-${dbName}-${table}` : `rc-queries-${dbName}`;
 }
 
-function load(dbName: string, table: string | null): SavedQuery[] {
-  try {
-    return JSON.parse(localStorage.getItem(savedQueriesKey(dbName, table)) ?? "[]");
-  } catch {
-    return [];
-  }
-}
-
-function save(dbName: string, table: string | null, queries: SavedQuery[]) {
-  localStorage.setItem(savedQueriesKey(dbName, table), JSON.stringify(queries));
-}
-
 export function SavedQueries({ dbName, activeTable, currentSql, onLoad }: Props) {
-  const [queries, setQueries] = useState<SavedQuery[]>([]);
+  const tableKey = activeTable ?? GLOBAL_KEY;
+  const [fullMap, setFullMap] = useState<QueriesMap>({});
+  const savePendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const queries = fullMap[tableKey] ?? [];
+
+  // Fetch full map from server when dbName changes; fall back to localStorage
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetch_() {
+      // Instant display from localStorage cache
+      const local = loadFullMapFromLs(dbName);
+      if (!cancelled) setFullMap(local);
+
+      try {
+        const res = await fetch(`/api/databases/${encodeURIComponent(dbName)}/queries`);
+        if (cancelled) return;
+        if (res.ok) {
+          const data: QueriesMap = await res.json();
+          const merged = { ...local, ...data }; // server wins per key
+          setFullMap(merged);
+          persistFullMap(dbName, merged);
+        } else if (Object.keys(local).length > 0) {
+          // Nothing on server yet — upload the local data to migrate it
+          saveToServer(dbName, local);
+        }
+      } catch {
+        // Network error — stay with localStorage
+      }
+    }
+
+    fetch_();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbName]);
+
+  function saveToServer(db: string, map: QueriesMap) {
+    window.fetch(`/api/databases/${encodeURIComponent(db)}/queries`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(map),
+    }).catch(() => {});
+  }
+
+  function updateQueries(newQueries: SavedQuery[]) {
+    const newMap = { ...fullMap, [tableKey]: newQueries };
+    setFullMap(newMap);
+    persistFullMap(dbName, newMap);
+    if (savePendingRef.current) clearTimeout(savePendingRef.current);
+    savePendingRef.current = setTimeout(() => saveToServer(dbName, newMap), 600);
+  }
+
+  // ── UI state ──────────────────────────────────────────────────────────────
+
   const [savingName, setSavingName] = useState("");
   const [showInput, setShowInput] = useState(false);
-
-  useEffect(() => {
-    setQueries(load(dbName, activeTable));
-  }, [dbName, activeTable]);
 
   function handleSave() {
     const name = savingName.trim();
     if (!name) return;
-    const updated = [...queries.filter((q) => q.name !== name), { name, sql: currentSql }];
-    save(dbName, activeTable, updated);
-    setQueries(updated);
+    updateQueries([...queries.filter((q) => q.name !== name), { name, sql: currentSql }]);
     setSavingName("");
     setShowInput(false);
   }
 
   function handleDelete(name: string) {
     if (!confirm(`Delete query "${name}"?`)) return;
-    const updated = queries.filter((q) => q.name !== name);
-    save(dbName, activeTable, updated);
-    setQueries(updated);
+    updateQueries(queries.filter((q) => q.name !== name));
   }
 
   return (

@@ -11,7 +11,9 @@ async function getDatabases(userId: string) {
     sortBy: { column: "updated_at", order: "desc" },
   });
   if (error) return [];
-  return (data ?? []).filter((f) => !f.name.endsWith(".groups.json"));
+  return (data ?? []).filter(
+    (f) => !f.name.endsWith(".groups.json") && !f.name.endsWith(".queries.json")
+  );
 }
 
 export default async function HomePage() {
