@@ -208,7 +208,7 @@ function gridLayout(schema: TableSchema[], groups: GroupDef[], isDesignMode: boo
     groupNodes.push({
       id: groupId, type: "groupNode",
       position: { x: 0, y: cursorY },
-      style: { width: groupW, height: groupH, zIndex: -1 },
+      style: { width: groupW, height: groupH },
       draggable: true, selectable: true,
       data: { label: group.name, palette, isDesignMode },
     });
@@ -293,9 +293,14 @@ const nodeTypes: Record<string, any> = { tableNode: ErdTableNode, groupNode: Gro
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const edgeTypes: Record<string, any> = { dependencyEdge: DependencyEdge };
 
-interface Props { db: Database | null; dbName: string; rowCounts: Record<string, number> }
+interface Props {
+  db: Database | null;
+  dbName: string;
+  rowCounts: Record<string, number>;
+  visible?: boolean;
+}
 
-export function ErdDiagram({ db, dbName, rowCounts }: Props) {
+export function ErdDiagram({ db, dbName, rowCounts, visible }: Props) {
   const { theme } = useTheme();
   const isDark = theme === "dark" || (theme === "auto" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
@@ -328,6 +333,10 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
   const edgeSpreadRef = useRef(false);
   const hiddenTablesRef = useRef<Set<string>>(new Set());
   const dbNameRef = useRef(dbName);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rfRef = useRef<any>(null);
+  // Track whether we've done the initial fitView for this db session
+  const hasFittedRef = useRef(false);
 
   useEffect(() => { storedDepsRef.current = storedDeps; }, [storedDeps]);
   useEffect(() => { isDesignModeRef.current = isDesignMode; }, [isDesignMode]);
@@ -337,12 +346,27 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
   useEffect(() => { hiddenTablesRef.current = hiddenTables; }, [hiddenTables]);
   useEffect(() => { dbNameRef.current = dbName; }, [dbName]);
 
+  // Reset fit state when the database changes so the new db always gets a first fit
+  useEffect(() => { hasFittedRef.current = false; }, [dbName]);
+
+  // Call fitView the first time the schema tab becomes visible AND nodes are ready.
+  // We skip this while hidden (display:none) because fitView with a 0×0 container
+  // produces an unusable viewport.
+  useEffect(() => {
+    if (!visible || hasFittedRef.current || nodes.length === 0) return;
+    hasFittedRef.current = true;
+    const t = setTimeout(() => rfRef.current?.fitView({ padding: 0.12 }), 80);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, nodes.length]);
+
   // ── persistence helpers ──────────────────────────────────────────────────────
 
-  function putLayout(data: LayoutData) {
+  function putLayout(data: LayoutData, keepalive = false) {
     fetch(`/api/databases/${encodeURIComponent(dbNameRef.current)}/layout`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
+      keepalive,  // true during page-unload so the browser doesn't cancel the request
     }).catch(() => {});
   }
 
@@ -380,10 +404,9 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
 
   useEffect(() => {
     return () => {
-      if (saveLayoutPendingRef.current) {
-        clearTimeout(saveLayoutPendingRef.current);
-        if (savedLayoutRef.current) putLayout(savedLayoutRef.current);
-      }
+      if (saveLayoutPendingRef.current) clearTimeout(saveLayoutPendingRef.current);
+      // keepalive ensures the PUT survives a page reload / navigation-away
+      if (savedLayoutRef.current) putLayout(savedLayoutRef.current, true);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbName]);
@@ -654,7 +677,7 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
   }
 
   const proOptions = useMemo(() => ({ hideAttribution: true }), []);
-  const onInit = useCallback((inst: { fitView: () => void }) => { setTimeout(() => inst.fitView(), 50); }, []);
+  const onInit = useCallback((inst: unknown) => { rfRef.current = inst; }, []);
 
   const depCount = storedDeps.length;
   const groupCount = groups.filter(g => g.tables.some(t => nodes.find(n => n.id === t))).length;
@@ -671,7 +694,6 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
         onConnect={isDesignMode ? handleConnect : undefined}
         onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes} edgeTypes={edgeTypes}
-        fitView fitViewOptions={{ padding: 0.12 }}
         minZoom={0.1} maxZoom={2}
         proOptions={proOptions}
         onInit={onInit as never}

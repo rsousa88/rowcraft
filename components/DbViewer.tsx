@@ -638,7 +638,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
             className="flex flex-1 overflow-hidden"
             style={{ display: view === "schema" ? "flex" : "none" }}
           >
-            <ErdDiagram db={db} dbName={dbName} rowCounts={rowCounts} />
+            <ErdDiagram db={db} dbName={dbName} rowCounts={rowCounts} visible={view === "schema"} />
           </div>
 
           {/* ── Query view (always mounted) ── */}
