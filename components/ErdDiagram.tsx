@@ -20,9 +20,7 @@ import type { Database } from "sql.js";
 import {
   ErdTableNode,
   NODE_WIDTH,
-  HEADER_HEIGHT,
-  ROW_HEIGHT,
-  PADDING_BOTTOM,
+  collapsedHeight,
   type TableNodeData,
   type ColumnInfo,
 } from "@/components/ErdTableNode";
@@ -91,20 +89,16 @@ function extractSchema(db: Database): TableSchema[] {
 }
 
 // ── Dagre layout ──────────────────────────────────────────────────────────────
+// All nodes start collapsed so we use the compact height for initial layout.
 
-function nodeHeight(colCount: number) {
-  return HEADER_HEIGHT + colCount * ROW_HEIGHT + PADDING_BOTTOM;
-}
-
-function applyLayout(nodes: Node[], edges: Edge[], schema: TableSchema[]): Node[] {
+function applyLayout(nodes: Node[], edges: Edge[]): Node[] {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "LR", nodesep: 60, ranksep: 100, edgesep: 30 });
+  g.setGraph({ rankdir: "LR", nodesep: 50, ranksep: 100, edgesep: 20 });
 
-  const heightMap = new Map(schema.map((t) => [t.name, nodeHeight(t.columns.length)]));
-
+  const h = collapsedHeight();
   for (const node of nodes) {
-    g.setNode(node.id, { width: NODE_WIDTH, height: heightMap.get(node.id) ?? 120 });
+    g.setNode(node.id, { width: NODE_WIDTH, height: h });
   }
   for (const edge of edges) {
     g.setEdge(edge.source, edge.target);
@@ -114,7 +108,6 @@ function applyLayout(nodes: Node[], edges: Edge[], schema: TableSchema[]): Node[
 
   return nodes.map((node) => {
     const pos = g.node(node.id);
-    const h = heightMap.get(node.id) ?? 120;
     return { ...node, position: { x: pos.x - NODE_WIDTH / 2, y: pos.y - h / 2 } };
   });
 }
@@ -130,6 +123,7 @@ function buildGraph(schema: TableSchema[], rowCounts: Record<string, number>) {
       label: table.name,
       columns: table.columns,
       rowCount: rowCounts[table.name],
+      collapsed: true, // all nodes start collapsed
     },
   }));
 
@@ -160,7 +154,7 @@ function buildGraph(schema: TableSchema[], rowCounts: Record<string, number>) {
     }
   }
 
-  const laidOutNodes = applyLayout(nodes, edges, schema);
+  const laidOutNodes = applyLayout(nodes, edges);
   return { nodes: laidOutNodes, edges };
 }
 
