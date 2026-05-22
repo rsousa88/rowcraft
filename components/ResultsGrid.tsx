@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import type { QueryResult } from "@/components/DbViewer";
 
 const PAGE_SIZES = [25, 50, 100, 500];
@@ -23,6 +23,12 @@ function exportCsv(result: QueryResult, filename: string) {
   a.download = filename.endsWith(".csv") ? filename : `${filename}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+function rowsToTsv(columns: string[], rows: QueryResult["rows"]): string {
+  const esc = (v: string | number | null) => (v === null ? "" : String(v).replace(/\t/g, " "));
+  const lines = [columns.join("\t"), ...rows.map((r) => r.map(esc).join("\t"))];
+  return lines.join("\n");
 }
 
 type SortCol = { col: number; dir: "asc" | "desc" };
@@ -63,7 +69,7 @@ function applySortFilter(
 interface Props {
   result: QueryResult;
   activeTable?: string | null;
-  tableTotal?: number;     // total rows in the table (from COUNT(*), ignores LIMIT)
+  tableTotal?: number;
   rowids?: number[];
   onEditRow?: (rowid: number, values: Record<string, string | null>) => void;
   onDeleteRow?: (rowid: number, msg: string) => void;
@@ -82,6 +88,9 @@ export function ResultsGrid({
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [showNewRow, setShowNewRow] = useState(false);
   const [newRowValues, setNewRowValues] = useState<Record<string, string>>({});
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [copyMenuOpen, setCopyMenuOpen] = useState(false);
+  const copyMenuRef = useRef<HTMLDivElement>(null);
 
   const editableMode = !!(rowids && onEditRow && onDeleteRow && onCreateRow);
 
@@ -91,7 +100,6 @@ export function ResultsGrid({
   const safePage = Math.min(page, totalPages - 1);
   const pageRows = filtered.slice(safePage * pageSize, (safePage + 1) * pageSize);
 
-  // Map filtered rows back to original indices to get correct rowids
   const filteredOriginalIndices = result.rows
     .map((row, i) => ({ row, i }))
     .filter(({ row }) =>
@@ -102,6 +110,27 @@ export function ResultsGrid({
   const pageRowids = rowids
     ? filteredOriginalIndices.slice(safePage * pageSize, (safePage + 1) * pageSize).map((i) => rowids[i])
     : undefined;
+
+  // Page-local indices (0-based within current page)
+  const pageLocalIndices = Array.from({ length: pageRows.length }, (_, i) => safePage * pageSize + i);
+
+  function toggleRowSelect(idx: number) {
+    setSelectedRows(prev => {
+      const next = new Set(prev);
+      next.has(idx) ? next.delete(idx) : next.add(idx);
+      return next;
+    });
+  }
+
+  function toggleAllPageRows() {
+    const allSelected = pageLocalIndices.every(i => selectedRows.has(i));
+    setSelectedRows(prev => {
+      const next = new Set(prev);
+      if (allSelected) pageLocalIndices.forEach(i => next.delete(i));
+      else pageLocalIndices.forEach(i => next.add(i));
+      return next;
+    });
+  }
 
   function handleSortClick(colIdx: number, shift: boolean) {
     setSort((prev) => {
@@ -139,12 +168,16 @@ export function ResultsGrid({
     setEditingRowid(null);
   }
 
-  // Column header cell — handles sort, sticky freeze
+  function copyToClipboard(rows: QueryResult["rows"]) {
+    navigator.clipboard.writeText(rowsToTsv(result.columns, rows)).catch(() => {});
+    setCopyMenuOpen(false);
+  }
+
+  // Column header cell
   const Th = useCallback(({ col, idx }: { col: string; idx: number }) => {
     const sortEntry = sort.find((s) => s.col === idx);
     const isFrozen = idx < freezeCols;
-    // frozen left offset: account for action col (64px) when editable
-    const leftPx = editableMode ? 64 + idx * 120 : idx * 120;
+    const leftPx = editableMode ? 64 + 20 + idx * 120 : 20 + idx * 120; // +20 for checkbox col
     return (
       <th
         onClick={(e) => handleSortClick(idx, e.shiftKey)}
@@ -175,15 +208,19 @@ export function ResultsGrid({
     <div className="p-4 text-sm text-zinc-400 dark:text-zinc-500">Query executed successfully (no rows returned)</div>
   );
 
-  const frozenLeftAction = 0; // action col always at left-0
-  const frozenLeftData = (idx: number) => editableMode ? 64 + idx * 120 : idx * 120;
+  const allPageSelected = pageLocalIndices.length > 0 && pageLocalIndices.every(i => selectedRows.has(i));
+  const somePageSelected = pageLocalIndices.some(i => selectedRows.has(i));
+  const selectedCount = selectedRows.size;
+
+  const frozenLeftChk = 0;
+  const frozenLeftAction = 20; // after checkbox col
+  const frozenLeftData = (idx: number) => editableMode ? 20 + 64 + idx * 120 : 20 + idx * 120;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
 
       {/* ── Toolbar ─────────────────────────────────────────────── */}
       <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 flex-wrap">
-        {/* Filter */}
         <input
           type="text"
           value={filter}
@@ -202,7 +239,6 @@ export function ResultsGrid({
           )}
         </span>
 
-        {/* Freeze */}
         <div className="flex items-center gap-1 text-xs text-zinc-400 dark:text-zinc-500">
           <span>Freeze</span>
           <select
@@ -229,6 +265,49 @@ export function ResultsGrid({
               + New row
             </button>
           )}
+
+          {/* Copy dropdown */}
+          <div className="relative" ref={copyMenuRef}>
+            <button
+              onClick={() => setCopyMenuOpen(o => !o)}
+              className="text-xs px-2 py-0.5 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors flex items-center gap-1"
+            >
+              Copy
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m6 9 6 6 6-6"/>
+              </svg>
+            </button>
+            {copyMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setCopyMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-20 min-w-[140px] rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg text-xs overflow-hidden">
+                  <button
+                    onClick={() => copyToClipboard(filtered)}
+                    className="w-full text-left px-3 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  >
+                    Copy All ({totalFiltered.toLocaleString()})
+                  </button>
+                  <button
+                    onClick={() => copyToClipboard(pageRows)}
+                    className="w-full text-left px-3 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-t border-zinc-100 dark:border-zinc-800"
+                  >
+                    Copy Page ({pageRows.length})
+                  </button>
+                  <button
+                    disabled={selectedCount === 0}
+                    onClick={() => {
+                      const rows = [...selectedRows].sort((a, b) => a - b).map(i => filtered[i]).filter(Boolean);
+                      copyToClipboard(rows);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-t border-zinc-100 dark:border-zinc-800 disabled:opacity-40"
+                  >
+                    Copy Selected ({selectedCount})
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
           <button
             onClick={() => exportCsv(result, activeTable ?? "export")}
             className="text-xs px-2 py-0.5 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
@@ -243,6 +322,20 @@ export function ResultsGrid({
         <table className="text-sm border-collapse" style={{ minWidth: "100%" }}>
           <thead>
             <tr className="bg-zinc-50 dark:bg-zinc-900 sticky top-0 z-10">
+              {/* Checkbox col */}
+              <th
+                className="w-5 px-1 border-b border-zinc-200 dark:border-zinc-800 sticky z-20 bg-zinc-50 dark:bg-zinc-900"
+                style={{ left: frozenLeftChk }}
+              >
+                <input
+                  type="checkbox"
+                  checked={allPageSelected}
+                  ref={(el) => { if (el) el.indeterminate = !allPageSelected && somePageSelected; }}
+                  onChange={toggleAllPageRows}
+                  className="accent-emerald-500"
+                  title="Select / deselect all rows on this page"
+                />
+              </th>
               {editableMode && (
                 <th
                   className={[
@@ -256,10 +349,10 @@ export function ResultsGrid({
             </tr>
           </thead>
           <tbody>
-            {/* New row form */}
             {showNewRow && editableMode && (
               <tr className="border-b border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30">
-                <td className="sticky left-0 z-10 px-2 py-1 bg-emerald-50 dark:bg-emerald-950/30 whitespace-nowrap">
+                <td className="sticky left-0 z-10 px-1 bg-emerald-50 dark:bg-emerald-950/30" style={{ width: 20 }} />
+                <td className="sticky px-2 py-1 bg-emerald-50 dark:bg-emerald-950/30 whitespace-nowrap" style={{ left: frozenLeftAction, zIndex: 10 }}>
                   <div className="flex gap-1">
                     <button onClick={() => {
                       onCreateRow!(Object.fromEntries(result.columns.map((c) => [c, newRowValues[c] === NULL_SENTINEL ? null : (newRowValues[c] ?? null)])));
@@ -281,21 +374,39 @@ export function ResultsGrid({
             )}
 
             {pageRows.map((row, rowIdx) => {
+              const absIdx = safePage * pageSize + rowIdx;
               const rowid = pageRowids?.[rowIdx];
               const isEditing = editingRowid === rowid && rowid != null;
+              const isSelected = selectedRows.has(absIdx);
               return (
                 <tr
                   key={rowIdx}
                   className={[
                     "group border-b border-zinc-100 dark:border-zinc-800/50",
-                    isEditing ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/30",
+                    isEditing ? "bg-blue-50 dark:bg-blue-950/20" : isSelected ? "bg-emerald-50/50 dark:bg-emerald-950/20" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/30",
                   ].join(" ")}
                 >
+                  {/* Checkbox cell */}
+                  <td
+                    className={[
+                      "sticky z-10 px-1 py-0.5 w-5",
+                      isEditing ? "bg-blue-50 dark:bg-blue-950/20" : isSelected ? "bg-emerald-50/50 dark:bg-emerald-950/20" : "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800",
+                    ].join(" ")}
+                    style={{ left: frozenLeftChk }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleRowSelect(absIdx)}
+                      className="accent-emerald-500"
+                    />
+                  </td>
+
                   {editableMode && (
                     <td
                       className={[
                         "sticky z-10 px-2 py-1 w-16 whitespace-nowrap",
-                        isEditing ? "bg-blue-50 dark:bg-blue-950/20" : "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800/30",
+                        isEditing ? "bg-blue-50 dark:bg-blue-950/20" : isSelected ? "bg-emerald-50/50 dark:bg-emerald-950/20" : "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800",
                       ].join(" ")}
                       style={{ left: frozenLeftAction }}
                     >
@@ -321,8 +432,9 @@ export function ResultsGrid({
                         className={[
                           "px-1 py-0.5",
                           isFrozen ? "sticky z-10 shadow-[2px_0_0_0_rgba(0,0,0,0.06)]" : "",
-                          isFrozen && !isEditing ? "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800/30" : "",
+                          isFrozen && !isEditing && !isSelected ? "bg-white dark:bg-zinc-950 group-hover:bg-zinc-50 dark:group-hover:bg-zinc-800" : "",
                           isFrozen && isEditing ? "bg-blue-50 dark:bg-blue-950/20" : "",
+                          isFrozen && isSelected && !isEditing ? "bg-emerald-50/50 dark:bg-emerald-950/20" : "",
                         ].join(" ")}
                         style={isFrozen ? { left: frozenLeftData(ci) } : undefined}
                       >
@@ -363,6 +475,9 @@ export function ResultsGrid({
           >
             {PAGE_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
+          {selectedCount > 0 && (
+            <span className="text-emerald-600 dark:text-emerald-400">{selectedCount} selected</span>
+          )}
         </div>
         <div className="flex items-center gap-2 tabular-nums">
           <span>{Math.min(safePage * pageSize + 1, totalFiltered)}–{Math.min((safePage + 1) * pageSize, totalFiltered)} of {totalFiltered.toLocaleString()}</span>

@@ -1,7 +1,7 @@
 "use client";
 
 import CodeMirror, { EditorView, keymap } from "@uiw/react-codemirror";
-import { sql, SQLDialect, SQLNamespace } from "@codemirror/lang-sql";
+import { sql, SQLite, SQLNamespace } from "@codemirror/lang-sql";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { githubLight } from "@uiw/codemirror-theme-github";
 import { autocompletion, startCompletion } from "@codemirror/autocomplete";
@@ -24,7 +24,7 @@ export default function SqlEditor({ value, onChange, onSelectionChange, tables, 
 
   const extensions = [
     sql({
-      dialect: SQLDialect.define({ keywords: "" }),
+      dialect: SQLite,
       schema,
       upperCaseKeywords: true,
     }),

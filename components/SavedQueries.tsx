@@ -68,6 +68,11 @@ export function SavedQueries({ dbName, activeTable, currentSql, onLoad }: Props)
 
   const queries = fullMap[tableKey] ?? [];
 
+  // All queries across all tables — shown in the load dropdown
+  const allQueries = Object.entries(fullMap).flatMap(([key, qs]) =>
+    qs.map(q => ({ ...q, tableKey: key }))
+  );
+
   // Fetch full map from server when dbName changes; fall back to localStorage
   useEffect(() => {
     let cancelled = false;
@@ -135,19 +140,21 @@ export function SavedQueries({ dbName, activeTable, currentSql, onLoad }: Props)
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      {queries.length > 0 && (
+      {allQueries.length > 0 && (
         <select
-          className="text-xs rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 max-w-[180px] truncate"
-          defaultValue=""
+          className="text-xs rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 max-w-[200px] truncate"
+          value=""
           onChange={(e) => {
-            const q = queries.find((q) => q.name === e.target.value);
+            const [tKey, name] = e.target.value.split("\x00");
+            const q = (fullMap[tKey] ?? []).find((q) => q.name === name);
             if (q) onLoad(q.sql);
-            e.target.value = "";
           }}
         >
           <option value="" disabled>Load query…</option>
-          {queries.map((q) => (
-            <option key={q.name} value={q.name}>{q.name}</option>
+          {allQueries.map((q) => (
+            <option key={`${q.tableKey}\x00${q.name}`} value={`${q.tableKey}\x00${q.name}`}>
+              {q.tableKey !== GLOBAL_KEY ? `[${q.tableKey}] ` : ""}{q.name}
+            </option>
           ))}
         </select>
       )}
@@ -155,10 +162,9 @@ export function SavedQueries({ dbName, activeTable, currentSql, onLoad }: Props)
       {queries.length > 0 && (
         <select
           className="text-xs rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 max-w-[160px]"
-          defaultValue=""
+          value=""
           onChange={(e) => {
             if (e.target.value) handleDelete(e.target.value);
-            e.target.value = "";
           }}
         >
           <option value="" disabled>Delete query…</option>

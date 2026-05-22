@@ -93,6 +93,7 @@ export function QueryHistory({ dbName, onLoad }: Props) {
                   key={i}
                   onClick={() => { onLoad(entry.sql); setOpen(false); }}
                   className="w-full text-left px-3 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-b border-zinc-50 dark:border-zinc-800/50 last:border-0"
+                  title="Click to load into editor (does not run automatically)"
                 >
                   <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5">{fmt(entry.ts)}</div>
                   <div className="text-xs font-mono text-zinc-700 dark:text-zinc-300 truncate">{entry.sql.replace(/\s+/g, " ").trim()}</div>

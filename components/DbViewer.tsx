@@ -383,6 +383,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
   }
 
   function handleTableSelect(table: string) {
+    setView("query");
     setActiveTable(table);
     setResult(null);
     const allCols = columns[table] ?? [];
@@ -436,6 +437,13 @@ export function DbViewer({ dbName }: { dbName: string }) {
           database.run(`DROP TABLE "${action.table}"`);
           database.run(`ALTER TABLE "__tmp_${action.table}" RENAME TO "${action.table}"`);
           database.run(`COMMIT`);
+        }
+      } else if (action.type === "dropTable") {
+        database.run(`DROP TABLE "${action.table}"`);
+        if (activeTable === action.table) {
+          setActiveTable(null);
+          setResult(null);
+          setSqlText("");
         }
       } else if (action.type === "renameTable" && action.value) {
         database.run(`ALTER TABLE "${action.table}" RENAME TO "${action.value}"`);
@@ -493,12 +501,11 @@ export function DbViewer({ dbName }: { dbName: string }) {
     }
   }
 
-  // Load a query from saved/history, syncing column checkboxes from the SELECT list
-  function loadQuery(q: string) {
-    setSqlText(q);
+  // Sync column selection from a SELECT query string
+  function syncColsFromQuery(q: string) {
     const fromMatch = q.match(/FROM\s+"?([^"\s;]+)"?/i);
     const table = fromMatch?.[1];
-    if (!table || !columns[table]) { execQuery(q); return; }
+    if (!table || !columns[table]) return;
     setActiveTable(table);
     const selectPart = q.match(/^SELECT\s+([\s\S]+?)\s+FROM/i)?.[1]?.trim();
     if (!selectPart || selectPart === "*") {
@@ -508,7 +515,22 @@ export function DbViewer({ dbName }: { dbName: string }) {
       for (const m of selectPart.matchAll(/"([^"]+)"/g)) parsed.add(m[1]);
       if (parsed.size > 0) setSelectedCols((p) => ({ ...p, [table]: parsed }));
     }
+  }
+
+  // Load a query from saved queries — syncs columns AND runs
+  function loadQuery(q: string) {
+    setSqlText(q);
+    const fromMatch = q.match(/FROM\s+"?([^"\s;]+)"?/i);
+    const table = fromMatch?.[1];
+    if (!table || !columns[table]) { execQuery(q); return; }
+    syncColsFromQuery(q);
     execQuery(q, true, table);
+  }
+
+  // Load a query from history — syncs columns but does NOT run
+  function loadQueryToEditor(q: string) {
+    setSqlText(q);
+    syncColsFromQuery(q);
   }
 
   if (loadError) {
@@ -619,7 +641,7 @@ export function DbViewer({ dbName }: { dbName: string }) {
               {/* Editor toolbar */}
               <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800 px-3 py-1.5 flex items-center gap-2">
                 <SavedQueries dbName={dbName} activeTable={activeTable} currentSql={sqlText} onLoad={loadQuery} />
-                <QueryHistory dbName={dbName} onLoad={loadQuery} />
+                <QueryHistory dbName={dbName} onLoad={loadQueryToEditor} />
                 <div className="ml-auto flex items-center gap-1.5 shrink-0">
                   {hasSelection && (
                     <button

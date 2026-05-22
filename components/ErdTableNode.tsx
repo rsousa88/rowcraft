@@ -43,7 +43,8 @@ export interface TableNodeData {
   rowCount?: number;
   collapsed?: boolean;
   isDesignMode?: boolean;
-  parentGroupId?: string; // group node ID if this table is inside a group
+  parentGroupId?: string;
+  onHideTable?: (id: string) => void;
   [key: string]: unknown;
 }
 
@@ -89,7 +90,7 @@ export function ErdTableNode({ id, data, selected }: { id: string; data: TableNo
     >
       {/* Header */}
       <div
-        className="bg-emerald-600 px-3 py-2 flex items-center gap-2 cursor-pointer hover:bg-emerald-700 transition-colors rounded-t-lg"
+        className="group bg-emerald-600 px-3 py-2 flex items-center gap-2 cursor-pointer hover:bg-emerald-700 transition-colors rounded-t-lg"
         onClick={toggle}
         title={`${data.label}${collapsed ? " — click to expand" : " — click to collapse"}`}
       >
@@ -100,6 +101,15 @@ export function ErdTableNode({ id, data, selected }: { id: string; data: TableNo
         <span className="flex-1 text-white text-xs font-bold truncate">{data.label}</span>
         {data.rowCount != null && <span className="text-emerald-200 text-[10px] tabular-nums shrink-0">{data.rowCount.toLocaleString()}</span>}
         {collapsed && data.columns.length > 0 && <span className="text-emerald-300 text-[10px] tabular-nums shrink-0">{data.columns.length} col{data.columns.length !== 1 ? "s" : ""}</span>}
+        {!data.isDesignMode && data.onHideTable && (
+          <button
+            onClick={(e) => { e.stopPropagation(); (data.onHideTable as (id: string) => void)(id); }}
+            className="opacity-0 group-hover:opacity-100 text-emerald-300 hover:text-white text-[10px] leading-none px-0.5 transition-opacity ml-0.5"
+            title="Hide table from diagram"
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       {/* FK handles — always present, position animates */}

@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface SchemaAction {
-  type: "addCol" | "renameCol" | "dropCol" | "renameTable";
+  type: "addCol" | "renameCol" | "dropCol" | "renameTable" | "dropTable";
   table: string;
   column?: string;
   value?: string;
@@ -347,7 +347,16 @@ export function TableSidebar({
                   <button onClick={() => setRenamingTable(null)} className="text-zinc-400 px-1">✕</button>
                 </div>
               ) : (
-                <button onClick={() => { setRenamingTable(table); setRenameTableValue(table); }} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200">Rename table…</button>
+                <div className="flex items-center justify-between">
+                  <button onClick={() => { setRenamingTable(table); setRenameTableValue(table); }} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200">Rename table…</button>
+                  <button
+                    onClick={() => { if (confirm(`Drop table "${table}"? This cannot be undone.`)) { onSchemaAction({ type: "dropTable", table }); setSchemaOpen(null); } }}
+                    className="text-zinc-400 hover:text-red-500 text-[10px]"
+                    title="Drop table"
+                  >
+                    Drop table
+                  </button>
+                </div>
               )}
             </div>
             <div className="px-3 py-1 text-zinc-400 dark:text-zinc-500 font-semibold uppercase tracking-wider text-[10px]">Columns</div>
