@@ -142,6 +142,28 @@ export function ErdTableNode({ id, data, selected }: { id: string; data: TableNo
           width: 1, height: 1, opacity: 0, pointerEvents: "none", zIndex: 10,
         }}
       />
+      <Handle
+        type="target" position={Position.Top} id="seq-tgt-top"
+        isConnectable={!!data.isDesignMode}
+        style={data.isDesignMode ? {
+          top: -4, left: "50%",
+          width: 8, height: 8,
+          background: "#3b82f6", border: "2px solid white",
+          borderRadius: "50%", cursor: "crosshair",
+          opacity: 1, pointerEvents: "all", zIndex: 10, transform: "translateX(-50%)",
+        } : { width: 1, height: 1, opacity: 0, pointerEvents: "none", zIndex: 10 }}
+      />
+      <Handle
+        type="source" position={Position.Bottom} id="seq-src-bottom"
+        isConnectable={!!data.isDesignMode}
+        style={data.isDesignMode ? {
+          bottom: -4, left: "50%",
+          width: 8, height: 8,
+          background: "#3b82f6", border: "2px solid white",
+          borderRadius: "50%", cursor: "crosshair",
+          opacity: 1, pointerEvents: "all", zIndex: 10, transform: "translateX(-50%)",
+        } : { width: 1, height: 1, opacity: 0, pointerEvents: "none", zIndex: 10 }}
+      />
 
       {/* Column rows */}
       {!collapsed && (
@@ -151,7 +173,7 @@ export function ErdTableNode({ id, data, selected }: { id: string; data: TableNo
               key={col.name}
               className="relative flex items-center px-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0"
               style={{ height: ROW_HEIGHT }}
-              title={`${col.name}${col.type ? ` · ${col.type}` : ""}${col.isPk ? " · Primary Key" : ""}${col.isFkSource ? " · Foreign Key" : ""}${col.isNotNull && !col.isPk ? " · NOT NULL" : ""}`}
+              data-tooltip={`${col.name}${col.type ? ` · ${col.type}` : ""}${col.isPk ? " · Primary Key" : ""}${col.isFkSource ? " · Foreign Key" : ""}${col.isNotNull && !col.isPk ? " · NOT NULL" : ""}`}
             >
               <span className="shrink-0 w-6 text-[9px] font-bold mr-1">
                 {col.isPk ? <span className="bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 px-1 py-0.5 rounded">PK</span>

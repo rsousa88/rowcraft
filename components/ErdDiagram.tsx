@@ -5,7 +5,7 @@ import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
   ReactFlow, Background, Controls, MiniMap, MarkerType, Panel,
-  useNodesState, useEdgesState,
+  useNodesState, useEdgesState, NodeResizer,
   BaseEdge, EdgeLabelRenderer, getSmoothStepPath, Handle, Position,
   type Node, type Edge, type EdgeProps, type Connection, BackgroundVariant,
 } from "@xyflow/react";
@@ -33,10 +33,16 @@ const GROUP_PALETTES = [
 
 interface GroupNodeData { label: string; palette: typeof GROUP_PALETTES[number]; isDesignMode?: boolean; [key: string]: unknown }
 
-function GroupBackgroundNode({ data }: { data: GroupNodeData }) {
+function GroupBackgroundNode({ data, selected }: { data: GroupNodeData; selected?: boolean }) {
   const { palette } = data;
   return (
     <div className="w-full h-full relative">
+      <NodeResizer
+        isVisible={selected}
+        minWidth={120} minHeight={80}
+        lineStyle={{ borderColor: palette.border, borderWidth: 2 }}
+        handleStyle={{ borderColor: palette.border, background: "white", width: 8, height: 8 }}
+      />
       {/* Visual background — pointer-events-none so child table nodes receive all events */}
       <div className="absolute inset-0 rounded-2xl border-2 pointer-events-none" style={{ background: palette.bg, borderColor: palette.border }}>
         <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider select-none" style={{ color: palette.label }}>
@@ -66,6 +72,28 @@ function GroupBackgroundNode({ data }: { data: GroupNodeData }) {
           opacity: 1, pointerEvents: "all", zIndex: 10, transform: "translateY(-50%)",
         } : { width: 1, height: 1, opacity: 0, pointerEvents: "none", zIndex: 10 }}
       />
+      <Handle
+        type="target" position={Position.Top} id="grp-seq-tgt-top"
+        isConnectable={!!data.isDesignMode}
+        style={data.isDesignMode ? {
+          top: -4, left: "50%",
+          width: 8, height: 8,
+          background: "#3b82f6", border: "2px solid white",
+          borderRadius: "50%", cursor: "crosshair",
+          opacity: 1, pointerEvents: "all", zIndex: 10, transform: "translateX(-50%)",
+        } : { width: 1, height: 1, opacity: 0, pointerEvents: "none", zIndex: 10 }}
+      />
+      <Handle
+        type="source" position={Position.Bottom} id="grp-seq-src-bottom"
+        isConnectable={!!data.isDesignMode}
+        style={data.isDesignMode ? {
+          bottom: -4, left: "50%",
+          width: 8, height: 8,
+          background: "#3b82f6", border: "2px solid white",
+          borderRadius: "50%", cursor: "crosshair",
+          opacity: 1, pointerEvents: "all", zIndex: 10, transform: "translateX(-50%)",
+        } : { width: 1, height: 1, opacity: 0, pointerEvents: "none", zIndex: 10 }}
+      />
     </div>
   );
 }
@@ -73,7 +101,10 @@ function GroupBackgroundNode({ data }: { data: GroupNodeData }) {
 // ── dependency edge ───────────────────────────────────────────────────────────
 
 function DependencyEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style, data }: EdgeProps) {
-  const [edgePath, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
+    sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition,
+    borderRadius: data?.edgeRounded === false ? 0 : undefined,
+  });
   return (
     <>
       <BaseEdge path={edgePath} markerEnd={markerEnd as string} style={style as React.CSSProperties} />
@@ -109,7 +140,7 @@ interface FkInfo { fromCol: string; toTable: string; toCol: string }
 interface TableSchema { name: string; columns: ColumnInfo[]; fks: FkInfo[] }
 interface GroupDef { id: string; name: string; tables: string[] }
 interface DepEdge { id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string }
-interface LayoutData { positions?: Record<string, { x: number; y: number }>; display?: { groups: boolean; tables: boolean } }
+interface LayoutData { positions?: Record<string, { x: number; y: number }>; display?: { groups: boolean; tables: boolean }; edgeRounded?: boolean }
 
 // ── schema extraction ─────────────────────────────────────────────────────────
 
@@ -174,7 +205,7 @@ function gridLayout(schema: TableSchema[], groups: GroupDef[], isDesignMode: boo
       id: groupId, type: "groupNode",
       position: { x: 0, y: cursorY },
       style: { width: groupW, height: groupH, zIndex: -1 },
-      draggable: true, selectable: false,
+      draggable: true, selectable: true,
       data: { label: group.name, palette, isDesignMode },
     });
 
@@ -223,8 +254,8 @@ function buildFkEdges(schema: TableSchema[]): Edge[] {
         source: table.name, sourceHandle: `src-${fk.fromCol}`,
         target: fk.toTable, targetHandle: `tgt-${fk.toCol}`,
         type: "smoothstep", animated: false,
-        style: { stroke: "#10b981", strokeWidth: 1.5 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: "#10b981", width: 14, height: 14 },
+        style: { stroke: "#10b981", strokeWidth: 1 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#10b981", width: 10, height: 10 },
         zIndex: 2,
       });
     }
@@ -232,15 +263,15 @@ function buildFkEdges(schema: TableSchema[]): Edge[] {
   return edges;
 }
 
-function depToEdge(dep: DepEdge, isDesignMode: boolean, onDelete?: (id: string) => void): Edge {
+function depToEdge(dep: DepEdge, isDesignMode: boolean, edgeRounded: boolean, onDelete?: (id: string) => void): Edge {
   return {
     id: dep.id,
     source: dep.source, sourceHandle: dep.sourceHandle ?? "seq-src",
     target: dep.target, targetHandle: dep.targetHandle ?? "seq-tgt",
     type: "dependencyEdge", animated: true,
-    style: { stroke: "#3b82f6", strokeWidth: 2, strokeDasharray: "8 4" },
-    markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6", width: 14, height: 14 },
-    data: { isDesignMode, onDelete },
+    style: { stroke: "#3b82f6", strokeWidth: 1.5, strokeDasharray: "6 3" },
+    markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6", width: 10, height: 10 },
+    data: { isDesignMode, edgeRounded, onDelete },
     zIndex: 3,
   };
 }
@@ -268,6 +299,7 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
   const [storedDeps, setStoredDeps] = useState<DepEdge[]>([]);
   const [showGroups, setShowGroups] = useState(true);
   const [showTables, setShowTables] = useState(true);
+  const [edgeRounded, setEdgeRounded] = useState(true);
 
   const savePendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveLayoutPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -277,11 +309,13 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
   const savedLayoutRef = useRef<LayoutData | null>(null);
   const showGroupsRef = useRef(true);
   const showTablesRef = useRef(true);
+  const edgeRoundedRef = useRef(true);
 
   useEffect(() => { storedDepsRef.current = storedDeps; }, [storedDeps]);
   useEffect(() => { isDesignModeRef.current = isDesignMode; }, [isDesignMode]);
   useEffect(() => { showGroupsRef.current = showGroups; }, [showGroups]);
   useEffect(() => { showTablesRef.current = showTables; }, [showTables]);
+  useEffect(() => { edgeRoundedRef.current = edgeRounded; }, [edgeRounded]);
 
   // ── persistence helpers ──────────────────────────────────────────────────────
 
@@ -296,6 +330,7 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
     const payload: LayoutData = {
       positions,
       display: { groups: showGroupsRef.current, tables: showTablesRef.current },
+      edgeRounded: edgeRoundedRef.current,
     };
     savedLayoutRef.current = payload;
     if (saveLayoutPendingRef.current) clearTimeout(saveLayoutPendingRef.current);
@@ -331,15 +366,30 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
       fetch(`/api/databases/${enc}/layout`).then(r => r.ok ? r.json() : {}).catch(() => ({})),
     ]).then(([g, d, l]) => {
       const layout = l as LayoutData;
+      // Set ref BEFORE state updates so any triggered layout effect sees the positions
+      savedLayoutRef.current = layout;
       setGroups(Array.isArray(g) ? g : []);
       setStoredDeps(Array.isArray(d) ? d : []);
-      savedLayoutRef.current = layout;
       // Restore display prefs
       if (layout?.display) {
         setShowGroups(layout.display.groups ?? true);
         setShowTables(layout.display.tables ?? true);
         showGroupsRef.current = layout.display.groups ?? true;
         showTablesRef.current = layout.display.tables ?? true;
+      }
+      // Restore edge style
+      if (layout?.edgeRounded !== undefined) {
+        setEdgeRounded(layout.edgeRounded);
+        edgeRoundedRef.current = layout.edgeRounded;
+      }
+      // Apply saved positions to any nodes already rendered (handles the race where db
+      // loaded before this fetch completed and gridLayout already ran with defaults)
+      if (layout?.positions) {
+        const pos = layout.positions;
+        setNodes(nds => nds.length === 0 ? nds : nds.map(n => {
+          const p = pos[n.id];
+          return p ? { ...n, position: p } : n;
+        }));
       }
     });
   }, [dbName]);
@@ -362,7 +412,7 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
     const depEdges = storedDepsRef.current
       .filter(d => schema.find(t => t.name === d.source) || groups.find(g => `__group__${g.id}` === d.source))
       .filter(d => schema.find(t => t.name === d.target) || groups.find(g => `__group__${g.id}` === d.target))
-      .map(d => depToEdge(d, isDesignModeRef.current, handleDepDelete));
+      .map(d => depToEdge(d, isDesignModeRef.current, edgeRoundedRef.current, handleDepDelete));
 
     const { nodes: tableNodes, groupNodes } = gridLayout(schema, groups, isDesignModeRef.current, rowCounts);
     setNodes(applyPositions([...groupNodes, ...tableNodes]));
@@ -383,7 +433,7 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
         const tgtOk = schema.find(t => t.name === d.target) || groups.find(g => `__group__${g.id}` === d.target);
         return srcOk && tgtOk;
       })
-      .map(d => depToEdge(d, isDesignModeRef.current, handleDepDelete));
+      .map(d => depToEdge(d, isDesignModeRef.current, edgeRoundedRef.current, handleDepDelete));
     setEdges(prev => {
       const fk = prev.filter(e => e.type !== "dependencyEdge");
       const prevIds = prev.filter(e => e.type === "dependencyEdge").map(e => e.id).sort().join(",");
@@ -405,6 +455,17 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
     setEdges(es => es.map(e => e.type === "dependencyEdge" ? { ...e, data: { ...e.data, isDesignMode, onDelete: handleDepDelete } } : e));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDesignMode]);
+
+  // ── edgeRounded sync ──────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    setEdges(es => es.map(e => e.type === "dependencyEdge" ? { ...e, data: { ...e.data, edgeRounded } } : e));
+    const current = savedLayoutRef.current ?? {};
+    const payload: LayoutData = { ...current, edgeRounded };
+    savedLayoutRef.current = payload;
+    putLayout(payload);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edgeRounded]);
 
   // ── dep deletion callback ────────────────────────────────────────────────────
 
@@ -428,7 +489,7 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
     };
     setEdges(es => {
       if (es.some(e => e.id === id)) return es;
-      return [...es, depToEdge(newDep, true, handleDepDelete)];
+      return [...es, depToEdge(newDep, true, edgeRoundedRef.current, handleDepDelete)];
     });
     setStoredDeps(prev => {
       if (prev.some(d => d.id === id)) return prev;
@@ -566,8 +627,23 @@ export function ErdDiagram({ db, dbName, rowCounts }: Props) {
               </button>
             </div>
 
-            {/* Show/hide toggles */}
+            {/* Edge style + show/hide toggles */}
             <div className="flex gap-1.5">
+              <button
+                onClick={() => setEdgeRounded(r => !r)}
+                title={edgeRounded ? "Switch to angular arrows" : "Switch to rounded arrows"}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-md border text-xs transition-colors border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              >
+                {edgeRounded ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12h14"/><path d="M5 12c0-4 3-7 7-7"/><path d="M19 12l-4-4"/><path d="M19 12l-4 4"/>
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 19V5h14v14"/><path d="M19 19l-4-4"/><path d="M19 19l-4 4"/>
+                  </svg>
+                )}
+              </button>
               <button
                 onClick={toggleShowGroups}
                 title={showGroups ? "Hide group containers" : "Show group containers"}
