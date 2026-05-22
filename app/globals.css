@@ -10,3 +10,8 @@
 body {
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Ensure dependency edge delete buttons always render above table nodes */
+.react-flow__edgelabel-renderer {
+  z-index: 1001 !important;
+}

@@ -43,13 +43,33 @@ function GroupBackgroundNode({ data }: { data: GroupNodeData }) {
           {data.label}
         </div>
       </div>
-      {/* Sequence Designer handles for group-to-group connections */}
-      {data.isDesignMode && (
-        <>
-          <Handle type="target" position={Position.Left} id="grp-seq-tgt" style={{ top: "50%", left: -8, width: 16, height: 16, background: "#3b82f6", border: "2.5px solid white", borderRadius: "50%", cursor: "crosshair", zIndex: 10 }} />
-          <Handle type="source" position={Position.Right} id="grp-seq-src" style={{ top: "50%", right: -8, width: 16, height: 16, background: "#3b82f6", border: "2.5px solid white", borderRadius: "50%", cursor: "crosshair", zIndex: 10 }} />
-        </>
-      )}
+      {/* Sequence Designer handles — always in DOM for edge routing; visible only in design mode */}
+      <Handle
+        type="target" position={Position.Left} id="grp-seq-tgt"
+        isConnectable={!!data.isDesignMode}
+        style={{
+          top: "50%", left: data.isDesignMode ? -8 : "50%",
+          width: data.isDesignMode ? 16 : 4, height: data.isDesignMode ? 16 : 4,
+          background: data.isDesignMode ? "#3b82f6" : "transparent",
+          border: data.isDesignMode ? "2.5px solid white" : "none",
+          borderRadius: "50%", cursor: data.isDesignMode ? "crosshair" : "default",
+          opacity: data.isDesignMode ? 1 : 0, pointerEvents: data.isDesignMode ? "all" : "none",
+          zIndex: 10, transform: "translateY(-50%)",
+        }}
+      />
+      <Handle
+        type="source" position={Position.Right} id="grp-seq-src"
+        isConnectable={!!data.isDesignMode}
+        style={{
+          top: "50%", right: data.isDesignMode ? -8 : "50%",
+          width: data.isDesignMode ? 16 : 4, height: data.isDesignMode ? 16 : 4,
+          background: data.isDesignMode ? "#3b82f6" : "transparent",
+          border: data.isDesignMode ? "2.5px solid white" : "none",
+          borderRadius: "50%", cursor: data.isDesignMode ? "crosshair" : "default",
+          opacity: data.isDesignMode ? 1 : 0, pointerEvents: data.isDesignMode ? "all" : "none",
+          zIndex: 10, transform: "translateY(-50%)",
+        }}
+      />
     </div>
   );
 }
