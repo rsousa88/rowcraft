@@ -9,7 +9,7 @@ const NULL_SENTINEL = "\x00__NULL__\x00";
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function exportCsv(result: QueryResult, filename: string) {
-  const esc = (v: string | number | null) => {
+  const esc = (v: string | number | boolean | null) => {
     if (v === null) return "";
     const s = String(v);
     return s.includes(",") || s.includes('"') || s.includes("\n")
@@ -26,7 +26,7 @@ function exportCsv(result: QueryResult, filename: string) {
 }
 
 function rowsToTsv(columns: string[], rows: QueryResult["rows"]): string {
-  const esc = (v: string | number | null) => (v === null ? "" : String(v).replace(/\t/g, " "));
+  const esc = (v: string | number | boolean | null) => (v === null ? "" : String(v).replace(/\t/g, " "));
   const lines = [columns.join("\t"), ...rows.map((r) => r.map(esc).join("\t"))];
   return lines.join("\n");
 }
@@ -70,9 +70,9 @@ interface Props {
   result: QueryResult;
   activeTable?: string | null;
   tableTotal?: number;
-  rowids?: number[];
-  onEditRow?: (rowid: number, values: Record<string, string | null>) => void;
-  onDeleteRow?: (rowid: number, msg: string) => void;
+  rowids?: (number | string)[];
+  onEditRow?: (rowid: number | string, values: Record<string, string | null>) => void;
+  onDeleteRow?: (rowid: number | string, msg: string) => void;
   onCreateRow?: (values: Record<string, string | null>) => void;
 }
 
@@ -84,7 +84,7 @@ export function ResultsGrid({
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortCol[]>([]);
   const [freezeCols, setFreezeCols] = useState(0);
-  const [editingRowid, setEditingRowid] = useState<number | null>(null);
+  const [editingRowid, setEditingRowid] = useState<number | string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [showNewRow, setShowNewRow] = useState(false);
   const [newRowValues, setNewRowValues] = useState<Record<string, string>>({});
@@ -147,7 +147,7 @@ export function ResultsGrid({
     setPage(0);
   }
 
-  function startEdit(rowIdx: number, rowid: number) {
+  function startEdit(rowIdx: number, rowid: number | string) {
     const absIdx = safePage * pageSize + rowIdx;
     const originalIdx = filteredOriginalIndices[absIdx];
     const row = result.rows[originalIdx];
@@ -159,7 +159,7 @@ export function ResultsGrid({
     setEditValues(vals);
   }
 
-  function commitEdit(rowid: number) {
+  function commitEdit(rowid: number | string) {
     const vals: Record<string, string | null> = {};
     result.columns.forEach((col) => {
       vals[col] = editValues[col] === NULL_SENTINEL ? null : editValues[col];

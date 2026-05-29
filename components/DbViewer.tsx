@@ -18,7 +18,7 @@ const CodeMirrorEditor = dynamic(() => import("@/components/SqlEditor"), { ssr: 
 
 export type QueryResult = {
   columns: string[];
-  rows: (string | number | null)[][];
+  rows: (string | number | boolean | null)[][];
   error?: string;
 };
 
@@ -181,7 +181,8 @@ export function DbViewer({ dbName }: { dbName: string }) {
     }
   }
 
-  function handleEditRow(rowid: number, values: Record<string, string | null>) {
+  function handleEditRow(rowid: number | string, values: Record<string, string | null>) {
+    if (typeof rowid !== "number") return;
     const database = dbRef.current;
     if (!database || !activeTable) return;
     const sets = Object.entries(values).map(([c]) => `"${c}" = ?`).join(", ");
@@ -195,7 +196,8 @@ export function DbViewer({ dbName }: { dbName: string }) {
     }
   }
 
-  function handleDeleteRow(rowid: number, confirmMsg: string) {
+  function handleDeleteRow(rowid: number | string, confirmMsg: string) {
+    if (typeof rowid !== "number") return;
     if (!confirm(confirmMsg)) return;
     const database = dbRef.current;
     if (!database || !activeTable) return;

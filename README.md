@@ -33,6 +33,13 @@ A web-based SQLite viewer and editor. Upload `.db` files, browse tables, run SQL
 - Explicit NULL vs. empty string control per field (∅ toggle)
 - Changes are in-memory (sql.js runs client-side); click **Save** to write back to cloud storage
 
+### Connectors
+- Open datasets from another local or desktop app without uploading that app's data to Rowcraft cloud storage
+- Connect through a browser-to-localhost bridge owned by the source app
+- Browse, filter, sort, page, and edit connector datasets in Rowcraft
+- Stage create/update/delete changes back to the source app; the source app remains the system of record
+- Keep connector mode separate from Rowcraft's cloud `.db` upload/save flow
+
 ### Schema management
 - Add, rename, and drop columns via the ⚙ schema editor in the sidebar
 - Rename tables
@@ -63,6 +70,53 @@ A web-based SQLite viewer and editor. Upload `.db` files, browse tables, run SQL
 ## Getting started
 
 Sign up for a free account at [rowcraft-jet.vercel.app](https://rowcraft-jet.vercel.app) — no installation required.
+
+---
+
+## Connectors
+
+Connectors let another app open one of its datasets in Rowcraft as an editable grid while keeping that app in control of the data. Rowcraft is intentionally passive in this flow: it defines the connector protocol, calls the source app's localhost bridge from browser-side code, and stages edits back through that bridge. Rowcraft does not know about specific apps and does not upload connector datasets to Supabase.
+
+Source apps launch Rowcraft with:
+
+```text
+/connectors/connect?bridge={encodedBridgeBaseUrl}&token={oneTimeToken}&dataset={encodedDatasetName}
+```
+
+Example:
+
+```text
+https://rowcraft-jet.vercel.app/connectors/connect?bridge=http%3A%2F%2F127.0.0.1%3A49152%2Frowcraft%2F&token=abc&dataset=accounts
+```
+
+The source app must expose a localhost bridge under `/rowcraft/`, with API routes under:
+
+```text
+{bridge}/api/v1/...
+```
+
+Rowcraft accepts only loopback HTTP bridge URLs:
+
+- `http://127.0.0.1:{port}/rowcraft/`
+- `http://localhost:{port}/rowcraft/`
+- `http://[::1]:{port}/rowcraft/`
+
+The connector bridge must provide:
+
+- `GET /api/v1/health`
+- `POST /api/v1/session/exchange`
+- `GET /api/v1/context`
+- `GET /api/v1/datasets`
+- `GET /api/v1/datasets/{datasetName}/columns`
+- `GET /api/v1/datasets/{datasetName}/records?offset=0&limit=500`
+- `POST /api/v1/datasets/{datasetName}/edit-session`
+- `GET /api/v1/datasets/{datasetName}/edit-session/{editSessionId}/changes`
+- `POST /api/v1/datasets/{datasetName}/edit-session/{editSessionId}/records`
+- `PATCH /api/v1/datasets/{datasetName}/edit-session/{editSessionId}/records/{rowId}`
+- `DELETE /api/v1/datasets/{datasetName}/edit-session/{editSessionId}/records/{rowId}`
+- `POST /api/v1/datasets/{datasetName}/edit-session/{editSessionId}/discard`
+
+Connector edits are staged. The source app decides when and how to apply staged changes to its own data store. For the full request/response contract, see [docs/connector-bridge-protocol.md](docs/connector-bridge-protocol.md).
 
 ---
 
